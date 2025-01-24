@@ -17,6 +17,8 @@ import com.graphhopper.util.*;
 import com.graphhopper.util.shapes.BBox;
 import com.graphhopper.util.shapes.GHPoint;
 import com.graphhopper.util.shapes.GHPoint3D;
+
+import org.checkerframework.checker.units.qual.g;
 import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.GeometryFactory;
 import org.locationtech.jts.geom.LineString;
@@ -403,10 +405,9 @@ public class BufferResource {
         if (roadNames == null || roadNames.trim().isEmpty()) {
             return new ArrayList<>();
         }
-        System.out.println(roadNames + "\t before Soundex");
+
         roadNames = roadNames.toUpperCase();
         roadNames = getSoundexRoadName(roadNames);
-        System.out.println(roadNames + "\t after Soundex");
 
         List<String> separatedNames = Arrays.asList(roadNames.split(","));
         return separatedNames;
