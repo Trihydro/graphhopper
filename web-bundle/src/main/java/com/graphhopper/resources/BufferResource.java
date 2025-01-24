@@ -32,6 +32,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.stream.Stream;
+import java.util.regex.Pattern;
 
 @Path("buffer")
 public class BufferResource {
@@ -44,6 +45,122 @@ public class BufferResource {
     private final GraphHopperConfig config;
 
     private final GeometryFactory geometryFactory = new GeometryFactory(new PrecisionModel(1E8));
+
+    // Section One: Change known abbreviations to be unabbreviated.
+    // This is much more desirable than vice versa
+    // because it ensures that misspellings of the unabbreviated are more likely
+    // to get correctly matched. For instance, BOULEVARD and BOLEVARD will end up
+    // correctly matched.
+    private static final Pattern BOULEVARD = Pattern.compile("BLVD");
+    private static final String BOULEVARD_REPLACEMENT = "BOULEVARD";
+    private static final Pattern COURT = Pattern.compile(" CT");
+    private static final String COURT_REPLACEMENT = " COURT";
+    private static final Pattern STREET = Pattern.compile(" ST\\b");
+    private static final String STREET_REPLACEMENT = "STREET";
+
+    // Section Two: String manipulation of soundalikes WITHIN a word
+    private static final Pattern KEEP_ONLY_ALPHANUMERIC_SPACE_OR_COMMA = Pattern.compile("[^A-Z0-9 ,]+");
+    private static final String KEEP_ONLY_ALPHANUMERIC_SPACE_OR_COMMA_REPLACEMENT = "";
+    private static final Pattern SCH = Pattern.compile("SCH");
+    private static final String SCH_REPLACEMENT = "KK";
+    private static final Pattern SC = Pattern.compile("SC");
+    private static final String SC_REPLACEMENT = "K";
+    private static final Pattern TIA = Pattern.compile("TIA");
+    private static final String TIA_REPLACEMENT = "x"; // TIA needs to be before the 'D' is changed to 'T'
+    private static final Pattern TIO = Pattern.compile("TIO");
+    private static final String TIO_REPLACEMENT = "x";
+    private static final Pattern TCH = Pattern.compile("TCH");
+    private static final String TCH_REPLACEMENT = "x";
+    private static final Pattern DG = Pattern.compile("DG");
+    private static final String DG_REPLACEMENT = "j";
+    private static final Pattern D = Pattern.compile("D");
+    private static final String D_REPLACEMENT = "T";
+    private static final Pattern MULTIPLE_R = Pattern.compile("RR+");
+    private static final String MULTIPLE_R_REPLACEMENT = "R";
+    private static final Pattern MULTIPLE_T = Pattern.compile("TT+");
+    private static final String MULTIPLE_T_REPLACEMENT = "T";
+    private static final Pattern MULTIPLE_P = Pattern.compile("PP+");
+    private static final String MULTIPLE_P_REPLACEMENT = "P";
+    private static final Pattern MULTIPLE_S = Pattern.compile("SS+");
+    private static final String MULTIPLE_S_REPLACEMENT = "K";
+    private static final Pattern MULTIPLE_F = Pattern.compile("FF+");
+    private static final String MULTIPLE_F_REPLACEMENT = "F";
+    private static final Pattern MULTIPLE_G = Pattern.compile("GG+");
+    private static final String MULTIPLE_G_REPLACEMENT = "j";
+    private static final Pattern MULTIPLE_L = Pattern.compile("LL+");
+    private static final String MULTIPLE_L_REPLACEMENT = "L";
+    private static final Pattern MULTIPLE_M = Pattern.compile("MM+");
+    private static final String MULTIPLE_M_REPLACEMENT = "M";
+    private static final Pattern MN = Pattern.compile("MN");
+    private static final String MN_REPLACEMENT = "M";
+    private static final Pattern MULTIPLE_N = Pattern.compile("NN+");
+    private static final String MULTIPLE_N_REPLACEMENT = "N";
+    private static final Pattern MULTIPLE_B = Pattern.compile("BB+");
+    private static final String MULTIPLE_B_REPLACEMENT = "B";
+    private static final Pattern MULTIPLE_V = Pattern.compile("VV+");
+    private static final String MULTIPLE_V_REPLACEMENT = "V";
+    private static final Pattern MULTIPLE_Z = Pattern.compile("ZZ+");
+    private static final String MULTIPLE_Z_REPLACEMENT = "K";
+    private static final Pattern FAKE_F = Pattern.compile("(?:GH|PH)");
+    private static final String FAKE_F_REPLACEMENT = "F";
+    private static final Pattern SILENT_INITIAL_CONSONANT_BEFORE_N = Pattern.compile("\\b[KGP]N");
+    private static final String SILENT_INITIAL_CONSONANT_BEFORE_N_REPLACEMENT = "N";
+    private static final Pattern MB = Pattern.compile("MB");
+    private static final String MB_REPLACEMENT = "M";
+    private static final Pattern CIA = Pattern.compile("CIA");
+    private static final String CIA_REPLACEMENT = "x"; // ''CH' needs to be after 'SCH'
+    private static final Pattern CH = Pattern.compile("CH");
+    private static final String CH_REPLACEMENT = "x";
+    private static final Pattern SIA = Pattern.compile("SIA");
+    private static final String SIA_REPLACEMENT = "x";
+    private static final Pattern SIO = Pattern.compile("SIO");
+    private static final String SIO_REPLACEMENT = "x";
+    private static final Pattern SH = Pattern.compile("SH");
+    private static final String SH_REPLACEMENT = "x";
+    private static final Pattern TH = Pattern.compile("TH");
+    private static final String TH_REPLACEMENT = "c";
+    private static final Pattern G = Pattern.compile("G");
+    private static final String G_REPLACEMENT = "j";
+    private static final Pattern CK = Pattern.compile("CK");
+    private static final String CK_REPLACEMENT = "K";
+    private static final Pattern Q = Pattern.compile("Q");
+    private static final String Q_REPLACEMENT = "K";
+    private static final Pattern S_C_Z = Pattern.compile("[SCZ]");
+    private static final String S_C_Z_REPLACEMENT = "K";
+    private static final Pattern X = Pattern.compile("X");
+    private static final String X_REPLACEMENT = "KK";
+    private static final Pattern AW_EW_OW = Pattern.compile("[AEO]W");
+    private static final String AW_EW_OW_REPLACEMENT = "";
+
+    // Section Three: Removing vowels and spaces should probably be the very last
+    // thing that is done because many of the earlier regex operations are based on
+    // how phonemes inside a word work and would give unexpected results across
+    // words. For instance, expected result is to turn the 'GH' in 'ENOUGH' into an
+    // 'F' but unexpected result would be to change the 'G H' in 'GOING HOME' into
+    // an 'F'. Consider carefully before putting any regex after removing spaces.
+    private static final Pattern REMOVE_ALL_VOWELS = Pattern.compile("[AEIOUY]");
+    private static final String REMOVE_ALL_VOWELS_REPLACEMENT = "";
+    private static final Pattern REMOVE_ALL_SPACES = Pattern.compile(" ");
+    private static final String REMOVE_ALL_SPACES_REPLACEMENT = "";
+
+    private static final Pattern[] SOUNDEX_PATTERNS = {
+            BOULEVARD, COURT, STREET, KEEP_ONLY_ALPHANUMERIC_SPACE_OR_COMMA, SCH, SC, TIA, TIO, TCH, DG, D, MULTIPLE_R,
+            MULTIPLE_T, MULTIPLE_P, MULTIPLE_S, MULTIPLE_F, MULTIPLE_G, MULTIPLE_L, MULTIPLE_M, MN, MULTIPLE_N,
+            MULTIPLE_B, MULTIPLE_V, MULTIPLE_Z, FAKE_F, SILENT_INITIAL_CONSONANT_BEFORE_N, MB, CIA, CH, SIA, SIO, SH,
+            TH, G, CK, Q, S_C_Z, X, AW_EW_OW, REMOVE_ALL_VOWELS, REMOVE_ALL_SPACES
+    };
+    private static final String[] SOUNDEX_REPLACEMENTS = {
+            BOULEVARD_REPLACEMENT, COURT_REPLACEMENT, STREET_REPLACEMENT,
+            KEEP_ONLY_ALPHANUMERIC_SPACE_OR_COMMA_REPLACEMENT, SCH_REPLACEMENT, SC_REPLACEMENT, TIA_REPLACEMENT,
+            TIO_REPLACEMENT, TCH_REPLACEMENT, DG_REPLACEMENT, D_REPLACEMENT, MULTIPLE_R_REPLACEMENT,
+            MULTIPLE_T_REPLACEMENT, MULTIPLE_P_REPLACEMENT, MULTIPLE_S_REPLACEMENT, MULTIPLE_F_REPLACEMENT,
+            MULTIPLE_G_REPLACEMENT, MULTIPLE_L_REPLACEMENT, MULTIPLE_M_REPLACEMENT, MN_REPLACEMENT,
+            MULTIPLE_N_REPLACEMENT, MULTIPLE_B_REPLACEMENT, MULTIPLE_V_REPLACEMENT, MULTIPLE_Z_REPLACEMENT,
+            FAKE_F_REPLACEMENT, SILENT_INITIAL_CONSONANT_BEFORE_N_REPLACEMENT, MB_REPLACEMENT, CIA_REPLACEMENT,
+            CH_REPLACEMENT, SIA_REPLACEMENT, SIO_REPLACEMENT, SH_REPLACEMENT, TH_REPLACEMENT, G_REPLACEMENT,
+            CK_REPLACEMENT, Q_REPLACEMENT, S_C_Z_REPLACEMENT, X_REPLACEMENT, AW_EW_OW_REPLACEMENT,
+            REMOVE_ALL_VOWELS_REPLACEMENT, REMOVE_ALL_SPACES_REPLACEMENT
+    };
 
     @Inject
     public BufferResource(GraphHopperConfig config, GraphHopper graphHopper) {
@@ -189,6 +306,13 @@ public class BufferResource {
         return filteredEdgesInBbox;
     }
 
+    private String getSoundexRoadName(String incomingRoadName) {
+        for (int i = 0; i < SOUNDEX_PATTERNS.length; i++) {
+            incomingRoadName = SOUNDEX_PATTERNS[i].matcher(incomingRoadName).replaceAll(SOUNDEX_REPLACEMENTS[i]);
+        }
+        return incomingRoadName;
+    }
+
     /**
      * Given a starting segment, finds the buffer feature at the distance threshold, the point along
      * that edge at the threshold, and the geometry of the starting edge.
@@ -257,21 +381,34 @@ public class BufferResource {
     }
 
     /**
-     * Splits a comma-separated list of road names, then removes any spaces, casing, and dashes.
+     * Uses a strategy called Soundex https://en.wikipedia.org/wiki/Soundex to
+     * convert each word into units of sound (sort of like syllables but more
+     * technically 'phonemes'). This allows for many misspellings or typos to be
+     * recognized as the intended word. For instance, Soundex can recognize that
+     * someone typing BOULLEVARD likely meant BOULEVARD. After running a customized
+     * Soundex, spaces are removed and the result is split by commas. The Soundex
+     * strategy that we use compares words first by converting all words to
+     * uppercase. This means that the comparisons are case-insensitive although the
+     * regex results used during processing make use of casing to handle different
+     * phonemes. For example, Soundex will find that HEDGES and hEDGes are identical
+     * but it does this by comparing the Soundex cased result of HjS for both of
+     * them. Note that the results are useful for comparison but are not fit for
+     * return to User.
      *
      * @param roadNames comma-separated list of road names
      * @return list of split road names
      */
     private List<String> sanitizeRoadNames(String roadNames) {
         // Return empty list if roadNames is null
-        if (roadNames == null) {
+        if (roadNames == null || roadNames.trim().isEmpty()) {
             return new ArrayList<>();
         }
+        System.out.println(roadNames + "\t before Soundex");
+        roadNames = roadNames.toUpperCase();
+        roadNames = getSoundexRoadName(roadNames);
+        System.out.println(roadNames + "\t after Soundex");
 
         List<String> separatedNames = Arrays.asList(roadNames.split(","));
-        // Replace any empty spaces or dashes from the road
-        separatedNames.replaceAll(s -> s.replace(" ", "").replace("-", "").toLowerCase());
-
         return separatedNames;
     }
 
