@@ -49,6 +49,10 @@ public class BufferResource {
     //region Constants, Enums and Records
     private static final double PROXIMITY_THRESHOLD_METERS = 6.096; // 20 feet
     private static final double INITIAL_SEARCH_RADIUS_DEGREES = 0.0001; // Roughly 11 meters
+    private static final int DUE_NORTHEAST = 45;
+    private static final int DUE_SOUTHEAST = 135;
+    private static final int DUE_SOUTHWEST = 225;
+    private static final int DUE_NORTHWEST = 315;
 
 
     enum Direction {
@@ -891,70 +895,76 @@ public class BufferResource {
     //endregion
     //region Direction Filtering
 
+    /**
+     * Filters a list of LineStrings based on the specified cardinal or intercardinal direction.
+     * Compares the furthest points of the first and last LineStrings to determine which aligns
+     * best with the desired direction, returning only the selected LineString.
+     * @param lineStrings   list of LineStrings to filter
+     * @param buildUpstream whether the paths were built up or downstream
+     * @param directionEnum the direction to filter by
+     * @return A list of LineStrings filtered by the specified direction.
+     */
     private List<LineString> filterPathsByDirection(List<LineString> lineStrings, Boolean buildUpstream, Direction directionEnum) {
         if (lineStrings == null || lineStrings.isEmpty()) {
             return Collections.emptyList();
         }
+
+        if (lineStrings.size() == 1) {
+            return lineStrings;
+        }
+
         Point furthestPointOfFirstPath = buildUpstream ? lineStrings.get(0).getStartPoint() : lineStrings.get(0).getEndPoint();
         Point furthestPointOfSecondPath = buildUpstream ? lineStrings.get(lineStrings.size() - 1).getStartPoint() : lineStrings.get(lineStrings.size() - 1).getEndPoint();
+        boolean selectFirstPath = true;
+
+        // For non-cardinal directions: Calculate bearing between terminal points for better direction accuracy.
+        // Splits the circle into two halves and checks if the angle is within the specified half.
+        int bearing = (int) Math.round(AngleCalc.ANGLE_CALC.calcAzimuth(
+                furthestPointOfFirstPath.getY(), furthestPointOfFirstPath.getX(),
+                furthestPointOfSecondPath.getY(),furthestPointOfSecondPath.getX()));
 
         switch (directionEnum) {
             case NORTH:
-                return furthestPointOfFirstPath.getY() < furthestPointOfSecondPath.getY()
-                        ? Collections.singletonList(lineStrings.get(0))
-                        : Collections.singletonList(lineStrings.get(lineStrings.size() - 1));
+                selectFirstPath = buildUpstream
+                    ? furthestPointOfFirstPath.getY() < furthestPointOfSecondPath.getY()
+                    : furthestPointOfFirstPath.getY() > furthestPointOfSecondPath.getY();
+                break;
             case SOUTH:
-                return furthestPointOfFirstPath.getY() > furthestPointOfSecondPath.getY()
-                        ? Collections.singletonList(lineStrings.get(0))
-                        : Collections.singletonList(lineStrings.get(lineStrings.size() - 1));
+                selectFirstPath = buildUpstream
+                    ? furthestPointOfFirstPath.getY() > furthestPointOfSecondPath.getY()
+                    : furthestPointOfFirstPath.getY() < furthestPointOfSecondPath.getY();
+                break;
             case EAST:
-                return furthestPointOfFirstPath.getX() < furthestPointOfSecondPath.getX()
-                        ? Collections.singletonList(lineStrings.get(0))
-                        : Collections.singletonList(lineStrings.get(lineStrings.size() - 1));
+                selectFirstPath = buildUpstream
+                    ? furthestPointOfFirstPath.getX() < furthestPointOfSecondPath.getX()
+                    : furthestPointOfFirstPath.getX() > furthestPointOfSecondPath.getX();
+                break;
             case WEST:
-                return furthestPointOfFirstPath.getX() > furthestPointOfSecondPath.getX()
-                        ? Collections.singletonList(lineStrings.get(0))
-                        : Collections.singletonList(lineStrings.get(lineStrings.size() - 1));
+                selectFirstPath = buildUpstream
+                    ? furthestPointOfFirstPath.getX() > furthestPointOfSecondPath.getX()
+                    : furthestPointOfFirstPath.getX() < furthestPointOfSecondPath.getX();
+                break;
+            case NORTHEAST:
+                selectFirstPath = bearing >= DUE_NORTHWEST || bearing <= DUE_SOUTHEAST;
+                break;
+            case SOUTHWEST:
+                selectFirstPath = bearing > DUE_SOUTHEAST && bearing < DUE_NORTHWEST;
+                break;
+            case NORTHWEST:
+                selectFirstPath = bearing >= DUE_SOUTHWEST || bearing <= DUE_NORTHEAST;
+                break;
+            case SOUTHEAST:
+                selectFirstPath = bearing > DUE_NORTHEAST && bearing < DUE_SOUTHWEST;
+                break;
             case BOTH, UNKNOWN:
                 return lineStrings;
             default:
                 break;
         }
 
-        // For non-cardinal directions, use bearing calculation
-        // Splits the circle into two halves and checks if the angle is within the specified half.
-        // For instance, if the direction is NorthEast but the angle in question is NNW (North by Northwest),
-        // this would return true because NNW is closer to NE than it is to the opposite, SW.
-        int bearing = (int) Math.round(AngleCalc.ANGLE_CALC.calcAzimuth(furthestPointOfFirstPath.getY(), furthestPointOfFirstPath.getX(), furthestPointOfSecondPath.getY(),furthestPointOfSecondPath.getX()));
-        // In a case like if start point is in a hairpin turn, it might be the case that NEITHER lineString looks good
-        // or that BOTH lineStrings look good.  By taking the bearing from one terminal to the other, we have a better
-        // chance to be correct than if we check the bearing of one lineString.
-        boolean isFirstLineStringBetter = false;
-        int DUE_NORTHEAST = 45;
-        int DUE_SOUTHEAST = 135;
-        int DUE_SOUTHWEST = 225;
-        int DUE_NORTHWEST = 315;
-
-        switch (directionEnum) {
-            case NORTHEAST:
-                isFirstLineStringBetter = bearing >= DUE_NORTHWEST || bearing <= DUE_SOUTHEAST;
-                break;
-            case SOUTHWEST:
-                isFirstLineStringBetter = bearing > DUE_SOUTHEAST && bearing < DUE_NORTHWEST;
-                break;
-            case NORTHWEST:
-                isFirstLineStringBetter = bearing >= DUE_SOUTHWEST || bearing <= DUE_NORTHEAST;
-                break;
-            case SOUTHEAST:
-                isFirstLineStringBetter = bearing > DUE_NORTHEAST && bearing < DUE_SOUTHWEST;
-                break;
-            default:
-                break;
-        }
-
-        return isFirstLineStringBetter
-                ? Collections.singletonList(lineStrings.get(0))
-                : Collections.singletonList(lineStrings.get(lineStrings.size() - 1));
+        return selectFirstPath
+            ? Collections.singletonList(lineStrings.get(0))
+            : Collections.singletonList(lineStrings.get(lineStrings.size() - 1));
     }
 
     //endregion
@@ -962,8 +972,8 @@ public class BufferResource {
 
     /**
      * Combines the StreetName and StreetRef from an EdgeIteratorState. Each list can potentially
-     * include different route names so we need to combine both lists.
-     * I.e. streetNames contains "Purple Heart Trl" while streetRef contains "I 80"
+     * include different route names, so we need to combine both lists.
+     * I.e. streetNames contain "Purple Heart Trl" while streetRef contains "I 80"
      *
      * @param state the edge iterator state to fetch from
      * @return list of road names from street name and ref
@@ -982,7 +992,7 @@ public class BufferResource {
      * @return list of split road names
      */
     private List<String> sanitizeRoadNames(String roadNames) {
-        // Return empty list if roadNames is null
+        // Return the empty list if roadNames is null
         if (roadNames == null) {
             return new ArrayList<>();
         }
@@ -1033,7 +1043,7 @@ public class BufferResource {
      */
     private String findClosestMatchingRoadName(List<String> roadNames, String targetRoadName) {
         if (targetRoadName != null) {
-            // Use LCS to find best matching road name
+            // Use LCS to find the best matching road name
             return roadNames.stream()
                     .max((name1, name2) -> Integer.compare(
                             calculateLCSLength(targetRoadName, name1),
@@ -1096,7 +1106,7 @@ public class BufferResource {
             return true;
         }
 
-        // Single point requires distance validation against the threshold distance
+        // A single point requires distance validation against the threshold distance
         // 1. If the start feature is within the threshold distance of the nearest node, we can return it
         // 2. Otherwise, we cannot return it as it would exceed the threshold
         EdgeIteratorState startEdgeState = graph.getEdgeIteratorState(startFeature.getEdge(), Integer.MIN_VALUE);
@@ -1126,12 +1136,12 @@ public class BufferResource {
             // Coming from a bidirectional road means either its base or adjacent could
             // match
             if (isBidirectional(currentState)) {
-                // For upstream, adjacent node must match
+                // For upstream, the adjacent node must match
                 if (upstreamPath) {
                     return tempState.getAdjNode() == currentState.getBaseNode()
                             || tempState.getAdjNode() == currentState.getAdjNode();
                 }
-                // For downstream, base node must match
+                // For downstream, the base node must match
                 else {
                     return tempState.getBaseNode() == currentState.getBaseNode()
                             || tempState.getBaseNode() == currentState.getAdjNode();
@@ -1140,11 +1150,11 @@ public class BufferResource {
             // Coming in from a unidirectional road means the opposite type node must match
             // the tempState's node
             else {
-                // For upstream, adjacent node must match
+                // For upstream, the adjacent node must match
                 if (upstreamPath) {
                     return tempState.getAdjNode() == currentState.getBaseNode();
                 }
-                // For downstream, base node must match
+                // For downstream, the base node must match
                 else {
                     return tempState.getBaseNode() == currentState.getAdjNode();
                 }
@@ -1156,7 +1166,7 @@ public class BufferResource {
      * Checks if the road has access flags going in both directions.
      *
      * @param state edge under question
-     * @return true if road is bidirectional
+     * @return true if the road is bidirectional
      */
     private Boolean isBidirectional(EdgeIteratorState state) {
         return state.get(this.carAccessEnc) && state.getReverse(this.carAccessEnc);
