@@ -905,11 +905,11 @@ public class BufferResource {
      * @return A list of LineStrings filtered by the specified direction.
      */
     private List<LineString> filterPathsByDirection(List<LineString> lineStrings, Boolean buildUpstream, Direction directionEnum) {
-        if (lineStrings == null || lineStrings.isEmpty()) {
-            return Collections.emptyList();
+        if (lineStrings == null || lineStrings.isEmpty() || lineStrings.size() == 1) {
+            return lineStrings != null ? lineStrings : Collections.emptyList();
         }
 
-        if (lineStrings.size() == 1) {
+        if (directionEnum == Direction.BOTH || directionEnum == Direction.UNKNOWN) {
             return lineStrings;
         }
 
@@ -956,8 +956,6 @@ public class BufferResource {
             case SOUTHEAST:
                 selectFirstPath = bearing > DUE_NORTHEAST && bearing < DUE_SOUTHWEST;
                 break;
-            case BOTH, UNKNOWN:
-                return lineStrings;
             default:
                 break;
         }
