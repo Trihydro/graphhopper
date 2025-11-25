@@ -68,6 +68,13 @@ public class BufferResource {
         BOTH
     }
 
+    private static final EnumSet<Direction> CARDINAL_DIRECTIONS = EnumSet.of(
+            Direction.NORTH,
+            Direction.SOUTH,
+            Direction.EAST,
+            Direction.WEST
+    );
+
     /**
      * Represents the result of edge matching logic for the given location.
      * Contains the road name to use, whether to use unnamed fallback logic,
@@ -916,12 +923,7 @@ public class BufferResource {
         Point furthestPointOfFirstPath = buildUpstream ? lineStrings.get(0).getStartPoint() : lineStrings.get(0).getEndPoint();
         Point furthestPointOfSecondPath = buildUpstream ? lineStrings.get(lineStrings.size() - 1).getStartPoint() : lineStrings.get(lineStrings.size() - 1).getEndPoint();
         boolean selectFirstPath = true;
-
-        // For non-cardinal directions: Calculate bearing between terminal points for better direction accuracy.
-        // Splits the circle into two halves and checks if the angle is within the specified half.
-        int bearing = (int) Math.round(AngleCalc.ANGLE_CALC.calcAzimuth(
-                furthestPointOfFirstPath.getY(), furthestPointOfFirstPath.getX(),
-                furthestPointOfSecondPath.getY(),furthestPointOfSecondPath.getX()));
+        boolean isNonCardinal = !CARDINAL_DIRECTIONS.contains(directionEnum);
 
         switch (directionEnum) {
             case NORTH:
@@ -944,21 +946,35 @@ public class BufferResource {
                     ? furthestPointOfFirstPath.getX() > furthestPointOfSecondPath.getX()
                     : furthestPointOfFirstPath.getX() < furthestPointOfSecondPath.getX();
                 break;
-            case NORTHEAST:
-                selectFirstPath = bearing >= DUE_NORTHWEST || bearing <= DUE_SOUTHEAST;
-                break;
-            case SOUTHWEST:
-                selectFirstPath = bearing > DUE_SOUTHEAST && bearing < DUE_NORTHWEST;
-                break;
-            case NORTHWEST:
-                selectFirstPath = bearing >= DUE_SOUTHWEST || bearing <= DUE_NORTHEAST;
-                break;
-            case SOUTHEAST:
-                selectFirstPath = bearing > DUE_NORTHEAST && bearing < DUE_SOUTHWEST;
-                break;
             default:
                 break;
         }
+
+        if (isNonCardinal) {
+            // For non-cardinal directions: Calculate bearing between terminal points for better direction accuracy.
+            // Splits the circle into two halves and checks if the angle is within the specified half.
+            int bearing = (int) Math.round(AngleCalc.ANGLE_CALC.calcAzimuth(
+                    furthestPointOfFirstPath.getY(), furthestPointOfFirstPath.getX(),
+                    furthestPointOfSecondPath.getY(),furthestPointOfSecondPath.getX()));
+
+            switch (directionEnum) {
+                case NORTHEAST:
+                    selectFirstPath = bearing >= DUE_NORTHWEST || bearing <= DUE_SOUTHEAST;
+                    break;
+                case SOUTHWEST:
+                    selectFirstPath = bearing > DUE_SOUTHEAST && bearing < DUE_NORTHWEST;
+                    break;
+                case NORTHWEST:
+                    selectFirstPath = bearing >= DUE_SOUTHWEST || bearing <= DUE_NORTHEAST;
+                    break;
+                case SOUTHEAST:
+                    selectFirstPath = bearing > DUE_NORTHEAST && bearing < DUE_SOUTHWEST;
+                    break;
+                default:
+                    break;
+            }
+        }
+
 
         return selectFirstPath
             ? Collections.singletonList(lineStrings.get(0))
@@ -971,7 +987,7 @@ public class BufferResource {
     /**
      * Combines the StreetName and StreetRef from an EdgeIteratorState. Each list can potentially
      * include different route names, so we need to combine both lists.
-     * I.e. streetNames contain "Purple Heart Trl" while streetRef contains "I 80"
+     * I.e. streetNames contains "Purple Heart Trl" while streetRef contains "I 80"
      *
      * @param state the edge iterator state to fetch from
      * @return list of road names from street name and ref
