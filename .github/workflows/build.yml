@@ -76,6 +76,7 @@ jobs:
         run: |
           JAR_FILE=$(ls ./artifacts/*.jar | head -n 1)
           JAR_NAME=$(basename $JAR_FILE)
+          JAR_NAME=${JAR_NAME/-SNAPSHOT/}
           DATE=$(date +%Y%m%d-%H%M%S)
           echo "jar_file=$JAR_FILE" >> $GITHUB_OUTPUT
           echo "jar_name=$JAR_NAME" >> $GITHUB_OUTPUT
