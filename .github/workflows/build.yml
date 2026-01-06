@@ -44,7 +44,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: graphhopper-jar-${{ matrix.java-version }}
-          path: web-bundle/target/*.jar
+          path: web/target/*.jar
           retention-days: 90
 
   # Push to Azure DevOps
