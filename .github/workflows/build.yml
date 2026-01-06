@@ -160,26 +160,34 @@ jobs:
         run: |
           echo "Creating Pull Request in Azure DevOps..."
           
-          # Create PR using Azure DevOps REST API
-          PR_RESPONSE=$(curl -s -X POST \
+          # Encode PAT for authentication
+          AUTH_HEADER=$(printf ":%s" "$AZURE_DEVOPS_PAT" | base64)
+          
+          # Create PR payload
+          PR_PAYLOAD=$(cat <<'EOF'
+          {
+            "sourceRefName": "refs/heads/${{ env.BRANCH_NAME }}",
+            "targetRefName": "refs/heads/master",
+            "title": "Update GraphHopper JAR - ${{ steps.jar-info.outputs.date }}",
+            "description": "Automated PR to update GraphHopper JAR file.\n\n**Source:** GitHub repository\n**Commit:** ${{ github.sha }}\n**Java Version:** 25\n**Build Date:** ${{ steps.jar-info.outputs.date }}\n\nThis JAR was automatically built and uploaded by GitHub Actions."
+          }
+          EOF
+          )
+          
+          # Make API request - force HTTP/1.1 and show verbose output
+          HTTP_CODE=$(curl --http1.1 -w "%{http_code}" -o /tmp/pr_response.json \
+            -X POST \
             -H "Content-Type: application/json" \
-            -H "Authorization: Basic $(echo -n :$AZURE_DEVOPS_PAT | base64)" \
-            -d "{
-              \"sourceRefName\": \"refs/heads/${{ env.BRANCH_NAME }}\",
-              \"targetRefName\": \"refs/heads/master\",
-              \"title\": \"Update GraphHopper JAR - ${{ steps.jar-info.outputs.date }}\",
-              \"description\": \"Automated PR to update GraphHopper JAR file.\\n\\n**Source:** GitHub repository\\n**Commit:** ${{ github.sha }}\\n**Java Version:** 23\\n**Build Date:** ${{ steps.jar-info.outputs.date }}\\n\\nThis JAR was automatically built and uploaded by GitHub Actions.\"
-            }" \
+            -H "Authorization: Basic $AUTH_HEADER" \
+            -d "$PR_PAYLOAD" \
             "https://dev.azure.com/$AZURE_ORG/$AZURE_PROJECT/_apis/git/repositories/$AZURE_REPO/pullrequests?api-version=7.0")
-          
-          # Extract HTTP code and response body
-          HTTP_CODE=$(echo "$PR_RESPONSE" | grep -oP 'HTTP_CODE:\K[0-9]+')
-          RESPONSE_BODY=$(echo "$PR_RESPONSE" | sed 's/HTTP_CODE:[0-9]*$//')
-          
+               
           echo "HTTP Status Code: $HTTP_CODE"
-          echo "Response Body: $RESPONSE_BODY"
+          echo "Response Body:"
+          cat /tmp/pr_response.json
+          
           if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
-            PR_ID=$(echo "$RESPONSE_BODY" | jq -r '.pullRequestId // empty')
+            PR_ID=$(jq -r '.pullRequestId // empty' /tmp/pr_response.json)
             if [ -n "$PR_ID" ]; then
               echo "Pull Request created successfully!"
               echo "   PR ID: $PR_ID"
@@ -187,6 +195,6 @@ jobs:
             fi
           else
             echo "Failed to create Pull Request (HTTP $HTTP_CODE)"
-            echo "$RESPONSE_BODY" | jq . 2>/dev/null || echo "$RESPONSE_BODY"
+            jq . /tmp/pr_response.json 2>/dev/null || cat /tmp/pr_response.json
             exit 1
           fi
