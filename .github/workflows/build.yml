@@ -166,21 +166,27 @@ jobs:
             -H "Authorization: Basic $(echo -n :$AZURE_DEVOPS_PAT | base64)" \
             -d "{
               \"sourceRefName\": \"refs/heads/${{ env.BRANCH_NAME }}\",
-              \"targetRefName\": \"refs/heads/main\",
+              \"targetRefName\": \"refs/heads/master\",
               \"title\": \"Update GraphHopper JAR - ${{ steps.jar-info.outputs.date }}\",
               \"description\": \"Automated PR to update GraphHopper JAR file.\\n\\n**Source:** GitHub repository\\n**Commit:** ${{ github.sha }}\\n**Java Version:** 23\\n**Build Date:** ${{ steps.jar-info.outputs.date }}\\n\\nThis JAR was automatically built and uploaded by GitHub Actions.\"
             }" \
             "https://dev.azure.com/$AZURE_ORG/$AZURE_PROJECT/_apis/git/repositories/$AZURE_REPO/pullrequests?api-version=7.0")
           
-          PR_ID=$(echo $PR_RESPONSE | jq -r '.pullRequestId // empty')
+          # Extract HTTP code and response body
+          HTTP_CODE=$(echo "$PR_RESPONSE" | grep -oP 'HTTP_CODE:\K[0-9]+')
+          RESPONSE_BODY=$(echo "$PR_RESPONSE" | sed 's/HTTP_CODE:[0-9]*$//')
           
-          if [ -n "$PR_ID" ]; then
-            echo "Pull Request created successfully!"
-            echo "   PR ID: $PR_ID"
-            echo "   URL: https://dev.azure.com/$AZURE_ORG/$AZURE_PROJECT/_git/$AZURE_REPO/pullrequest/$PR_ID"
+          echo "HTTP Status Code: $HTTP_CODE"
+          echo "Response Body: $RESPONSE_BODY"
+          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+            PR_ID=$(echo "$RESPONSE_BODY" | jq -r '.pullRequestId // empty')
+            if [ -n "$PR_ID" ]; then
+              echo "Pull Request created successfully!"
+              echo "   PR ID: $PR_ID"
+              echo "   URL: https://dev.azure.com/$AZURE_ORG/$AZURE_PROJECT/_git/$AZURE_REPO/pullrequest/$PR_ID"
+            fi
           else
-            echo "Failed to create Pull Request"
-            echo "Response:"
-            echo "$PR_RESPONSE" | jq .
+            echo "Failed to create Pull Request (HTTP $HTTP_CODE)"
+            echo "$RESPONSE_BODY" | jq . 2>/dev/null || echo "$RESPONSE_BODY"
             exit 1
           fi
