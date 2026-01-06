@@ -130,11 +130,6 @@ jobs:
           cp ../${{ steps.jar-info.outputs.jar_file }} resources/
           echo "Copied new JAR file to resources/"
           
-          # Show what changed
-          echo ""
-          echo "Changes to be committed:"
-          git status --short
-          
           # Commit changes with multi-line message
           git add resources/
           git commit -m "Update GraphHopper JAR from GitHub build - ${{ steps.jar-info.outputs.date }}" \
@@ -164,19 +159,36 @@ jobs:
           echo "  Mode: $MODE"
           echo "======================================"
 
-      - name: Dry-run summary
-        if: steps.config.outputs.dry_run == 'true'
+      - name: Create Pull Request in Azure DevOps
+        env:
+          AZURE_DEVOPS_PAT: ${{ secrets.AZURE_DEVOPS_PAT }}
+          AZURE_ORG: trihydro
+          AZURE_PROJECT: SDX
+          AZURE_REPO: graphhopper
         run: |
-          echo ""
-          echo "======================================"
-          echo " DRY-RUN MODE SUMMARY"
-          echo "======================================"
-          echo ""
-          echo "✅ Authentication: SUCCESS"
-          echo "✅ Repository clone: SUCCESS"
-          echo "✅ Branch creation: SUCCESS (${{ env.BRANCH_NAME }})"
-          echo "✅ File operations: SUCCESS"
-          echo "✅ Git commit: SUCCESS"
-          echo "✅ Git push: SUCCESS"
-          echo ""
-          echo "======================================"
+          echo "Creating Pull Request in Azure DevOps..."
+          
+          # Create PR using Azure DevOps REST API
+          PR_RESPONSE=$(curl -s -X POST \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Basic $(echo -n :$AZURE_DEVOPS_PAT | base64)" \
+            -d "{
+              \"sourceRefName\": \"refs/heads/${{ env.BRANCH_NAME }}\",
+              \"targetRefName\": \"refs/heads/main\",
+              \"title\": \"Update GraphHopper JAR - ${{ steps.jar-info.outputs.date }}\",
+              \"description\": \"Automated PR to update GraphHopper JAR file.\\n\\n**Source:** GitHub repository\\n**Commit:** ${{ github.sha }}\\n**Java Version:** 23\\n**Build Date:** ${{ steps.jar-info.outputs.date }}\\n\\nThis JAR was automatically built and uploaded by GitHub Actions.\"
+            }" \
+            "https://dev.azure.com/$AZURE_ORG/$AZURE_PROJECT/_apis/git/repositories/$AZURE_REPO/pullrequests?api-version=7.0")
+          
+          PR_ID=$(echo $PR_RESPONSE | jq -r '.pullRequestId // empty')
+          
+          if [ -n "$PR_ID" ]; then
+            echo "Pull Request created successfully!"
+            echo "   PR ID: $PR_ID"
+            echo "   URL: https://dev.azure.com/$AZURE_ORG/$AZURE_PROJECT/_git/$AZURE_REPO/pullrequest/$PR_ID"
+          else
+            echo "Failed to create Pull Request"
+            echo "Response:"
+            echo "$PR_RESPONSE" | jq .
+            exit 1
+          fi
