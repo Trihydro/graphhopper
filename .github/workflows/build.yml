@@ -52,7 +52,7 @@ jobs:
     runs-on: ubuntu-22.04
     needs: build
     # Run on master or test branch
-    if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/test-azure-push'
+    if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/us/17033-azure-gh-pipeline'
     steps:
       - name: Set dry-run mode
         id: config
