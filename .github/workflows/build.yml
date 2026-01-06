@@ -68,7 +68,7 @@ jobs:
       - name: Download JAR Artifact
         uses: actions/download-artifact@v4
         with:
-          name: graphhopper-jar-23  # Use Java 23 build
+          name: graphhopper-jar-25
           path: ./artifacts
 
       - name: Get JAR info and set date
@@ -82,7 +82,7 @@ jobs:
           echo "date=$DATE" >> $GITHUB_OUTPUT
           echo "Found JAR: $JAR_NAME"
 
-      - name: Clone Azure DevOps repo and create branch
+      - name: Clone Azure DevOps repo and upload JAR
         env:
           AZURE_DEVOPS_PAT: ${{ secrets.AZURE_DEVOPS_PAT }}
           AZURE_ORG: trihydro
@@ -122,7 +122,7 @@ jobs:
             mv "resources/${{ steps.jar-info.outputs.jar_name }}" "$OLD_NAME"
             echo "Renamed existing JAR to: $(basename $OLD_NAME)"
           else
-            echo " No existing JAR file found (this may be the first upload)"
+            echo " No existing JAR file found"
           fi
           
           # Copy new JAR file
@@ -134,19 +134,11 @@ jobs:
           echo "Changes to be committed:"
           git status --short
           
-          # Determine mode for commit message
-          if [ "${{ steps.config.outputs.dry_run }}" = "true" ]; then
-            MODE="DRY-RUN (test)"
-          else
-            MODE="PRODUCTION"
-          fi
-          
           # Commit changes with multi-line message
           git add resources/
           git commit -m "Update GraphHopper JAR from GitHub build - ${{ steps.jar-info.outputs.date }}" \
                      -m "Built from commit: ${{ github.sha }}" \
-                     -m "Java version: 23" \
-                     -m "Mode: $MODE"
+                     -m "Java version: 25"
           
           echo "Changes committed"
           
@@ -170,41 +162,6 @@ jobs:
           echo "  JAR: ${{ steps.jar-info.outputs.jar_name }}"
           echo "  Mode: $MODE"
           echo "======================================"
-
-      - name: Create Pull Request in Azure DevOps
-        if: steps.config.outputs.dry_run == 'false'
-        env:
-          AZURE_DEVOPS_PAT: ${{ secrets.AZURE_DEVOPS_PAT }}
-          AZURE_ORG: your-org
-          AZURE_PROJECT: your-project
-          AZURE_REPO: your-repo
-        run: |
-          echo "Creating Pull Request in Azure DevOps..."
-          
-          # Create PR using Azure DevOps REST API
-          PR_RESPONSE=$(curl -s -X POST \
-            -H "Content-Type: application/json" \
-            -H "Authorization: Basic $(echo -n :$AZURE_DEVOPS_PAT | base64)" \
-            -d "{
-              \"sourceRefName\": \"refs/heads/${{ env.BRANCH_NAME }}\",
-              \"targetRefName\": \"refs/heads/main\",
-              \"title\": \"Update GraphHopper JAR - ${{ steps.jar-info.outputs.date }}\",
-              \"description\": \"Automated PR to update GraphHopper JAR file.\\n\\n**Source:** GitHub repository\\n**Commit:** ${{ github.sha }}\\n**Java Version:** 23\\n**Build Date:** ${{ steps.jar-info.outputs.date }}\\n\\nThis JAR was automatically built and uploaded by GitHub Actions.\"
-            }" \
-            "https://dev.azure.com/$AZURE_ORG/$AZURE_PROJECT/_apis/git/repositories/$AZURE_REPO/pullrequests?api-version=7.0")
-          
-          PR_ID=$(echo $PR_RESPONSE | jq -r '.pullRequestId // empty')
-          
-          if [ -n "$PR_ID" ]; then
-            echo "Pull Request created successfully!"
-            echo "   PR ID: $PR_ID"
-            echo "   URL: https://dev.azure.com/$AZURE_ORG/$AZURE_PROJECT/_git/$AZURE_REPO/pullrequest/$PR_ID"
-          else
-            echo "Failed to create Pull Request"
-            echo "Response:"
-            echo "$PR_RESPONSE" | jq .
-            exit 1
-          fi
 
       - name: Dry-run summary
         if: steps.config.outputs.dry_run == 'true'
