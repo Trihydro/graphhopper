@@ -4,14 +4,13 @@ import com.graphhopper.reader.ReaderWay;
 import com.graphhopper.routing.ev.BooleanEncodedValue;
 import com.graphhopper.routing.ev.EdgeIntAccess;
 import com.graphhopper.routing.util.FerrySpeedCalculator;
-import com.graphhopper.routing.util.TransportationMode;
 import com.graphhopper.storage.IntsRef;
 
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import static com.graphhopper.routing.util.parsers.OSMTemporalAccessParser.hasTemporalRestriction;
+import static com.graphhopper.routing.util.parsers.OSMTemporalAccessParser.hasPermissiveTemporalRestriction;
 
 public class ModeAccessParser implements TagParser {
 
@@ -54,7 +53,7 @@ public class ModeAccessParser implements TagParser {
 
         int firstIndex = way.getFirstIndex(restrictionKeys);
         String firstValue = firstIndex < 0 ? "" : way.getTag(restrictionKeys.get(firstIndex), "");
-        if (restrictedValues.contains(firstValue) && !hasTemporalRestriction(way, firstIndex, restrictionKeys))
+        if (restrictedValues.contains(firstValue) && !hasPermissiveTemporalRestriction(way, firstIndex, restrictionKeys, INTENDED))
             return;
 
         if (way.hasTag("gh:barrier_edge") && way.hasTag("node_tags")) {
