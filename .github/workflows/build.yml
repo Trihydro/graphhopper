@@ -54,17 +54,6 @@ jobs:
     # Run on master or test branch
     if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/us/17033-azure-gh-pipeline'
     steps:
-      - name: Set dry-run mode
-        id: config
-        run: |
-          if [ "${{ github.ref }}" = "refs/heads/master" ]; then
-            echo "dry_run=false" >> $GITHUB_OUTPUT
-            echo "Running in PRODUCTION mode - PR will be created"
-          else
-            echo "dry_run=true" >> $GITHUB_OUTPUT
-            echo "Running in DRY-RUN mode - No PR will be created (testing only)"
-          fi
-
       - name: Download JAR Artifact
         uses: actions/download-artifact@v4
         with:
@@ -158,6 +147,9 @@ jobs:
           echo "  JAR: ${{ steps.jar-info.outputs.jar_name }}"
           echo "  Mode: $MODE"
           echo "======================================"
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
 
       - name: Create Pull Request in Azure DevOps
         env:
