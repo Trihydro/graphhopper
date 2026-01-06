@@ -157,6 +157,7 @@ jobs:
           AZURE_ORG: trihydro
           AZURE_PROJECT: SDX
           AZURE_REPO: graphhopper
+          AZURE_GH_REPO_ID: ${{ secrets.AZURE_GH_REPO_ID }}
         run: |
           echo "Creating Pull Request in Azure DevOps..."
           
@@ -180,7 +181,7 @@ jobs:
             -H "Content-Type: application/json" \
             -H "Authorization: Basic $AUTH_HEADER" \
             -d "$PR_PAYLOAD" \
-            "https://dev.azure.com/$AZURE_ORG/$AZURE_PROJECT/_apis/git/repositories/$AZURE_REPO/pullrequests?api-version=7.0")
+            "https://dev.azure.com/$AZURE_ORG/$AZURE_PROJECT/_apis/git/repositories/$AZURE_GH_REPO_ID/pullrequests?api-version=7.1")
                
           echo "HTTP Status Code: $HTTP_CODE"
           echo "Response Body:"
