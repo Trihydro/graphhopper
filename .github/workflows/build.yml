@@ -116,8 +116,9 @@ jobs:
           fi
           
           # Copy new JAR file
-          cp ../${{ steps.jar-info.outputs.jar_file }} resources/
-          echo "Copied new JAR file to resources/"
+          cp ../${{ steps.jar-info.outputs.jar_file }} resources/${{ steps.jar-info.outputs.jar_name }}
+          echo "Copied new JAR file to resources/ as ${{ steps.jar-info.outputs.jar_name }}"
+          
           
           # Commit changes with multi-line message
           git add resources/
@@ -145,7 +146,6 @@ jobs:
           echo "Summary:"
           echo "  Branch: $BRANCH_NAME"
           echo "  JAR: ${{ steps.jar-info.outputs.jar_name }}"
-          echo "  Mode: $MODE"
           echo "======================================"
 
       - name: Create Pull Request in Azure DevOps
@@ -153,13 +153,26 @@ jobs:
           AZURE_DEVOPS_PAT: ${{ secrets.AZURE_DEVOPS_PAT }}
           AZURE_ORG: trihydro
           AZURE_PROJECT: SDX
-          AZURE_REPO: graphhopper
           AZURE_GH_REPO_ID: ${{ secrets.AZURE_GH_REPO_ID }}
+          REVIEWER_EMAIL: tsweckard@trihydro.com
         run: |
           echo "Creating Pull Request in Azure DevOps..."
           
           # Encode PAT for authentication
           AUTH_HEADER=$(echo -n ":${AZURE_DEVOPS_PAT}" | base64 | tr -d '\n')
+          
+          # Get reviewer user ID
+          echo "Looking up reviewer ID for ${REVIEWER_EMAIL}..."
+          REVIEWER_ID=$(curl -sSL \
+            -H "Authorization: Basic $AUTH_HEADER" \
+            "https://vssps.dev.azure.com/${AZURE_ORG}/_apis/graph/users?api-version=7.1-preview.1" | \
+            jq -r ".value[] | select(.mailAddress==\"${REVIEWER_EMAIL}\") | .originId")
+          
+          if [ -z "$REVIEWER_ID" ]; then
+            echo "Warning: Could not find user with email ${REVIEWER_EMAIL}"
+          else
+            echo "Found reviewer ID: $REVIEWER_ID"
+          fi
           
           # Create PR payload
           PR_PAYLOAD=$(cat <<EOF
@@ -167,7 +180,12 @@ jobs:
             "sourceRefName": "refs/heads/${{ env.BRANCH_NAME }}",
             "targetRefName": "refs/heads/master",
             "title": "Update GraphHopper JAR - ${{ steps.jar-info.outputs.date }}",
-            "description": "Automated PR to update GraphHopper JAR file.\n\n**Source:** GitHub repository\n**Commit:** ${{ github.sha }}\n**Java Version:** 25\n**Build Date:** ${{ steps.jar-info.outputs.date }}\n\nThis JAR was automatically built and uploaded by GitHub Actions."
+            "description": "Automated PR to update GraphHopper JAR file.\n\n**Source:** GitHub repository\n**Commit:** ${{ github.sha }}\n**Java Version:** 25\n**Build Date:** ${{ steps.jar-info.outputs.date }}\n\nThis JAR was automatically built and uploaded by GitHub Actions.",
+            "reviewers": [
+                {
+                  "id": "${REVIEWER_ID}"
+                }
+            ]
           }
           EOF
           )
@@ -181,14 +199,11 @@ jobs:
             "https://dev.azure.com/${AZURE_ORG}/${AZURE_PROJECT}/_apis/git/repositories/${AZURE_GH_REPO_ID}/pullrequests?api-version=7.1")
                
           echo "HTTP Status Code: $HTTP_CODE"
-          echo "Response Body:"
-          cat /tmp/pr_response.json
           
-          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
-            echo "Pull Request created successfully"
-            cat /tmp/pr_response.json
-          else
+          if [ "$HTTP_CODE" -ne 201 ]; then
             echo "Failed to create Pull Request (HTTP $HTTP_CODE)"
             cat /tmp/pr_response.json
             exit 1
           fi
+          
+          echo "Pull Request created successfully"
