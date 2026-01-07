@@ -148,6 +148,18 @@ jobs:
           echo "  JAR: ${{ steps.jar-info.outputs.jar_name }}"
           echo "======================================"
 
+      - name: Debug - List all users
+        env:
+          AZURE_DEVOPS_PAT: ${{ secrets.AZURE_DEVOPS_PAT }}
+        run: |
+          AUTH_HEADER=$(echo -n ":${AZURE_DEVOPS_PAT}" | base64 | tr -d '\n')
+
+          echo "Fetching all users from Azure DevOps..."
+          curl -sSL \
+            -H "Authorization: Basic $AUTH_HEADER" \
+            "https://vssps.dev.azure.com/${AZURE_ORG}/_apis/graph/users?api-version=7.1-preview.1" | \
+            jq -r '.value[] | "Name: \(.displayName) | Email: \(.mailAddress // "N/A") | ID: \(.originId)"'
+
       - name: Create Pull Request in Azure DevOps
         env:
           AZURE_DEVOPS_PAT: ${{ secrets.AZURE_DEVOPS_PAT }}
@@ -160,32 +172,14 @@ jobs:
           
           # Encode PAT for authentication
           AUTH_HEADER=$(echo -n ":${AZURE_DEVOPS_PAT}" | base64 | tr -d '\n')
-          
-          # Get reviewer user ID
-          echo "Looking up reviewer ID for ${REVIEWER_EMAIL}..."
-          REVIEWER_ID=$(curl -sSL \
-            -H "Authorization: Basic $AUTH_HEADER" \
-            "https://vssps.dev.azure.com/${AZURE_ORG}/_apis/graph/users?api-version=7.1-preview.1" | \
-            jq -r ".value[] | select(.mailAddress==\"${REVIEWER_EMAIL}\") | .originId")
-          
-          if [ -z "$REVIEWER_ID" ]; then
-            echo "Warning: Could not find user with email ${REVIEWER_EMAIL}"
-          else
-            echo "Found reviewer ID: $REVIEWER_ID"
-          fi
-          
+
           # Create PR payload
           PR_PAYLOAD=$(cat <<EOF
           {
             "sourceRefName": "refs/heads/${{ env.BRANCH_NAME }}",
             "targetRefName": "refs/heads/master",
             "title": "Update GraphHopper JAR - ${{ steps.jar-info.outputs.date }}",
-            "description": "Automated PR to update GraphHopper JAR file.\n\n**Source:** GitHub repository\n**Commit:** ${{ github.sha }}\n**Java Version:** 25\n**Build Date:** ${{ steps.jar-info.outputs.date }}\n\nThis JAR was automatically built and uploaded by GitHub Actions.",
-            "reviewers": [
-                {
-                  "id": "${REVIEWER_ID}"
-                }
-            ]
+            "description": "Automated PR to update GraphHopper JAR file.\n\n**Source:** GitHub repository\n**Commit:** ${{ github.sha }}\n**Java Version:** 25\n**Build Date:** ${{ steps.jar-info.outputs.date }}\n\nThis JAR was automatically built and uploaded by GitHub Actions."
           }
           EOF
           )
