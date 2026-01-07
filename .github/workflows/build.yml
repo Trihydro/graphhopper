@@ -148,25 +148,13 @@ jobs:
           echo "  JAR: ${{ steps.jar-info.outputs.jar_name }}"
           echo "======================================"
 
-      - name: Debug - List all users
-        env:
-          AZURE_DEVOPS_PAT: ${{ secrets.AZURE_DEVOPS_PAT }}
-        run: |
-          AUTH_HEADER=$(echo -n ":${AZURE_DEVOPS_PAT}" | base64 | tr -d '\n')
-
-          echo "Fetching all users from Azure DevOps..."
-          curl -sSL \
-            -H "Authorization: Basic $AUTH_HEADER" \
-            "https://vssps.dev.azure.com/${AZURE_ORG}/_apis/graph/users?api-version=7.1-preview.1" | \
-            jq -r '.value[] | "Name: \(.displayName) | Email: \(.mailAddress // "N/A") | ID: \(.originId)"'
-
       - name: Create Pull Request in Azure DevOps
         env:
           AZURE_DEVOPS_PAT: ${{ secrets.AZURE_DEVOPS_PAT }}
           AZURE_ORG: trihydro
           AZURE_PROJECT: SDX
           AZURE_GH_REPO_ID: ${{ secrets.AZURE_GH_REPO_ID }}
-          REVIEWER_EMAIL: tsweckard@trihydro.com
+          REVIEWER_ID: ${{ secrets.TEAGHEN_DEVOPS_USER_ID }}
         run: |
           echo "Creating Pull Request in Azure DevOps..."
           
@@ -179,7 +167,12 @@ jobs:
             "sourceRefName": "refs/heads/${{ env.BRANCH_NAME }}",
             "targetRefName": "refs/heads/master",
             "title": "Update GraphHopper JAR - ${{ steps.jar-info.outputs.date }}",
-            "description": "Automated PR to update GraphHopper JAR file.\n\n**Source:** GitHub repository\n**Commit:** ${{ github.sha }}\n**Java Version:** 25\n**Build Date:** ${{ steps.jar-info.outputs.date }}\n\nThis JAR was automatically built and uploaded by GitHub Actions."
+            "description": "Automated PR to update GraphHopper JAR file.\n\n**Source:** GitHub repository\n**Commit:** ${{ github.sha }}\n**Java Version:** 25\n**Build Date:** ${{ steps.jar-info.outputs.date }}\n\nThis JAR was automatically built and uploaded by GitHub Actions.",
+            "reviewers": [
+              {
+                "id": "${REVIEWER_ID}"
+              }
+            ]
           }
           EOF
           )
