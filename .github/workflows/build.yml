@@ -1,5 +1,11 @@
 name: Build and Test
 on: push
+
+env:
+  AZURE_ORG: trihydro
+  AZURE_PROJECT: SDX
+  AZURE_REPO: graphhopper
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -47,3 +53,108 @@ jobs:
           path: web/target/*.jar
           retention-days: 90
 
+  push-to-azure:
+    runs-on: ubuntu-22.04
+    needs: build
+    if: github.ref == 'refs/heads/master'
+    steps:
+      - name: Download JAR Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: graphhopper-jar-25
+          path: ./artifacts
+
+      - name: Get JAR info and set date
+        id: jar-info
+        run: |
+          JAR_FILE=$(ls ./artifacts/*.jar | head -n 1)
+          JAR_NAME=$(basename "$JAR_FILE" | sed 's/-SNAPSHOT//')
+          DATE=$(date +%Y%m%d-%H%M%S)
+
+          {
+            echo "jar_file=$JAR_FILE"
+            echo "jar_name=$JAR_NAME"
+            echo "date=$DATE"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Clone Azure DevOps Repository
+        env:
+          AZURE_DEVOPS_PAT: ${{ secrets.AZURE_DEVOPS_PAT }}
+        run: |
+          git clone https://$AZURE_DEVOPS_PAT@dev.azure.com/$AZURE_ORG/$AZURE_PROJECT/_git/$AZURE_REPO azure-repo
+
+      - name: Commit and push JAR to new branch
+        working-directory: azure-repo
+        run: |
+          # Configure git
+          git config user.name "GitHub Actions Bot"
+          git config user.email "github-actions@users.noreply.github.com"
+          
+          # Create a new branch
+          BRANCH_NAME="update-graphhopper-jar-${{ steps.jar-info.outputs.date }}"
+          git checkout -b $BRANCH_NAME
+          
+          # Create resources directory if it doesn't exist
+          mkdir -p resources
+          
+          # Rename existing JAR file if it exists
+          if [ -f "resources/${{ steps.jar-info.outputs.jar_name }}" ]; then
+            OLD_NAME="resources/$(basename ${{ steps.jar-info.outputs.jar_name }} .jar)-old-${{ steps.jar-info.outputs.date }}.jar"
+            mv "resources/${{ steps.jar-info.outputs.jar_name }}" "$OLD_NAME"
+          fi
+          
+          # Copy new JAR file
+          cp ../${{ steps.jar-info.outputs.jar_file }} resources/${{ steps.jar-info.outputs.jar_name }}
+          
+          # Commit changes
+          git add resources/
+          git commit -m "Update GraphHopper JAR from GitHub build - ${{ steps.jar-info.outputs.date }}" \
+                     -m "Built from commit: ${{ github.sha }}" \
+                     -m "Java version: 25"
+          
+          # Push the branch
+          git push origin $BRANCH_NAME
+          
+          # Save branch name for PR creation
+          echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
+
+      - name: Create Pull Request in Azure DevOps
+        env:
+          AZURE_DEVOPS_PAT: ${{ secrets.AZURE_DEVOPS_PAT }}
+          AZURE_GH_REPO_ID: ${{ secrets.AZURE_GH_REPO_ID }}
+          REVIEWER_ID_TEAGHEN: ${{ secrets.TEAGHEN_DEVOPS_USER_ID }}
+          REVIEWER_ID_CHAN: ${{ secrets.CHAN_DEVOPS_USER_ID }}
+        run: |
+          AUTH_HEADER=$(echo -n ":${AZURE_DEVOPS_PAT}" | base64 | tr -d '\n')
+
+          PR_PAYLOAD=$(cat <<EOF
+          {
+            "sourceRefName": "refs/heads/${{ env.BRANCH_NAME }}",
+            "targetRefName": "refs/heads/master",
+            "title": "Update GraphHopper JAR - ${{ steps.jar-info.outputs.date }}",
+            "description": "Automated PR to update GraphHopper JAR file.\n\n**Source:** GitHub repository\n**Commit:** ${{ github.sha }}\n**Java Version:** 25\n**Build Date:** ${{ steps.jar-info.outputs.date }}\n\nThis JAR was automatically built and uploaded by GitHub Actions.",
+            "reviewers": [
+              {
+                "id": "${REVIEWER_ID_TEAGHEN}"
+              },
+              {
+                "id": "${REVIEWER_ID_CHAN}"
+              }
+            ]
+          }
+          EOF
+          )
+          
+          # Make API request
+          HTTP_CODE=$(curl -sSL -w "%{http_code}" -o /tmp/pr_response.json \
+            -X POST \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Basic $AUTH_HEADER" \
+            -d "$PR_PAYLOAD" \
+            "https://dev.azure.com/${AZURE_ORG}/${AZURE_PROJECT}/_apis/git/repositories/${AZURE_GH_REPO_ID}/pullrequests?api-version=7.1")
+          
+          if [ "$HTTP_CODE" -ne 201 ]; then
+            echo "Failed to create Pull Request (HTTP $HTTP_CODE)"
+            cat /tmp/pr_response.json
+            exit 1
+          fi
