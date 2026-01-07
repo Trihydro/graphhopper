@@ -100,7 +100,7 @@ jobs:
           # Rename existing JAR file if it exists
           if [ -f "resources/${{ steps.jar-info.outputs.jar_name }}" ]; then
             OLD_NAME="resources/$(basename ${{ steps.jar-info.outputs.jar_name }} .jar)-old-${{ steps.jar-info.outputs.date }}.jar"
-            mv "resources/${{ steps.jar-info.outputs.jar_name }}" "$OLD_NAME
+            mv "resources/${{ steps.jar-info.outputs.jar_name }}" "$OLD_NAME"
           fi
           
           # Copy new JAR file
