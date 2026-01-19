@@ -62,6 +62,10 @@ jobs:
         id: jar-info
         run: |
           JAR_FILE=$(ls web/target/*.jar | head -n 1)
+          if [ -z "$JAR_FILE" ] || [ ! -f "$JAR_FILE" ]; then
+            echo "Error: No JAR file found in web/target/. Maven package step may have failed to produce a JAR." >&2
+            exit 1
+          fi
           JAR_NAME=$(basename "$JAR_FILE" | sed 's/-SNAPSHOT//')
           DATE=$(date +%Y%m%d-%H%M%S)
 
