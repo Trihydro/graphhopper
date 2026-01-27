@@ -21,6 +21,7 @@ import org.jetbrains.annotations.Nullable;
 import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.GeometryFactory;
 import org.locationtech.jts.geom.LineString;
+import org.locationtech.jts.geom.Point;
 import org.locationtech.jts.geom.PrecisionModel;
 
 import jakarta.inject.Inject;
@@ -42,13 +43,37 @@ public class BufferResource {
     private final GraphHopperConfig config;
     private final DistanceCalculationHelper distanceHelper;
     private final EdgeAngleCalculator angleCalculator;
-    private final DirectionFilterHelper directionFilterHelper;
 
     private final GeometryFactory geometryFactory = new GeometryFactory(new PrecisionModel(1E8));
 
     //region Constants, Enums and Records
     private static final double PROXIMITY_THRESHOLD_METERS = 6.096; // 20 feet
     private static final double INITIAL_SEARCH_RADIUS_DEGREES = 0.0001; // Roughly 11 meters
+    private static final int DUE_NORTHEAST = 45;
+    private static final int DUE_SOUTHEAST = 135;
+    private static final int DUE_SOUTHWEST = 225;
+    private static final int DUE_NORTHWEST = 315;
+
+
+    enum Direction {
+        UNKNOWN,
+        NORTH,
+        SOUTH,
+        EAST,
+        WEST,
+        NORTHWEST,
+        NORTHEAST,
+        SOUTHWEST,
+        SOUTHEAST,
+        BOTH
+    }
+
+    private static final EnumSet<Direction> CARDINAL_DIRECTIONS = EnumSet.of(
+            Direction.NORTH,
+            Direction.SOUTH,
+            Direction.EAST,
+            Direction.WEST
+    );
 
     /**
      * Represents the result of edge matching logic for the given location.
@@ -78,7 +103,6 @@ public class BufferResource {
         this.edgeExplorer = graph.createEdgeExplorer();
         this.distanceHelper = new DistanceCalculationHelper(graph, nodeAccess);
         this.angleCalculator = new EdgeAngleCalculator(graph);
-        this.directionFilterHelper = new DirectionFilterHelper();
 
         EncodingManager encodingManager = graphHopper.getEncodingManager();
         this.roundaboutAccessEnc = encodingManager.getBooleanEncodedValue(Roundabout.KEY);
@@ -102,6 +126,7 @@ public class BufferResource {
         validateInputParameters(queryMultiplier, requireRoadNameMatch, roadName);
 
         StopWatch stopWatch = new StopWatch().start();
+        Direction directionEnum = Direction.valueOf(direction.toUpperCase());
 
         EdgeMatchingDecision edgeMatchingDecision = determineEdgeMatchingStrategy(roadName, requireRoadNameMatch, point);
         String edgeRoadName = edgeMatchingDecision.roadName();
@@ -125,11 +150,7 @@ public class BufferResource {
             }
         }
 
-        List<LineString> filteredLineStrings = directionFilterHelper.filterPathsByDirection(
-                generatedPaths,
-                buildUpstream,
-                DirectionFilterHelper.Direction.valueOf(direction.toUpperCase()),
-                thresholdDistance);
+        List<LineString> filteredLineStrings = filterPathsByDirection(generatedPaths, buildUpstream, directionEnum);
         return createGeoJsonResponse(filteredLineStrings, stopWatch);
     }
 
@@ -546,7 +567,7 @@ public class BufferResource {
             List<Integer> potentialEdges = new ArrayList<>();
             List<Integer> potentialRoundaboutEdges = new ArrayList<>();
             List<Integer> potentialRoundaboutEdgesWithoutName = new ArrayList<>();
-            List<Integer> candidateEdgesFromUnnamedRoad = new ArrayList<>();
+            List<Integer> potentialUnnamedEdges = new ArrayList<>();
             currentEdge = -1;
 
             while (iterator.next()) {
@@ -587,15 +608,15 @@ public class BufferResource {
                         boolean matchesPreviousEdgeName = (currentIsBlank && previousIsBlank)
                                 || (currentEdgeRoadName != null && currentEdgeRoadName.equals(previousRoadName));
 
-                        if (matchesPreviousEdgeName && !currentIsBlank) {
-                            currentEdge = tempEdge;
-                            usedEdges.add(tempEdge);
-                            break;
-                        }
-
-                        // Collect both named and unnamed edges for angle-based selection when continuing from an unnamed road.
-                        if (previousIsBlank) {
-                            candidateEdgesFromUnnamedRoad.add(tempEdge);
+                        if (matchesPreviousEdgeName) {
+                            if (!currentIsBlank) {
+                                currentEdge = tempEdge;
+                                usedEdges.add(tempEdge);
+                                break;
+                            }
+                            potentialUnnamedEdges.add(tempEdge);
+                        } else if (previousIsBlank) {
+                            potentialEdges.add(tempEdge);
                         }
                     }
 
@@ -607,8 +628,8 @@ public class BufferResource {
             }
 
             // No bidirectional edge found. Choose from potential edge lists.
-            if (!candidateEdgesFromUnnamedRoad.isEmpty()) {
-                currentEdge = angleCalculator.selectStraightestEdge(candidateEdgesFromUnnamedRoad, currentState, currentNode);
+            if (!potentialUnnamedEdges.isEmpty()) {
+                currentEdge = angleCalculator.selectStraightestEdge(potentialUnnamedEdges, currentState, currentNode);
                 usedEdges.add(currentEdge);
             }
             else if (currentEdge == -1) {
@@ -876,6 +897,88 @@ public class BufferResource {
         }
 
         return closestEdge;
+    }
+
+    //endregion
+    //region Direction Filtering
+
+    /**
+     * Filters a list of LineStrings based on the specified cardinal or intercardinal direction.
+     * Compares the furthest points of the first and last LineStrings to determine which aligns
+     * best with the desired direction, returning only the selected LineString.
+     * @param lineStrings   list of LineStrings to filter
+     * @param buildUpstream whether the paths were built up or downstream
+     * @param directionEnum the direction to filter by
+     * @return A list of LineStrings filtered by the specified direction.
+     */
+    private List<LineString> filterPathsByDirection(List<LineString> lineStrings, Boolean buildUpstream, Direction directionEnum) {
+        if (lineStrings == null || lineStrings.isEmpty() || lineStrings.size() == 1) {
+            return lineStrings != null ? lineStrings : Collections.emptyList();
+        }
+
+        if (directionEnum == Direction.BOTH || directionEnum == Direction.UNKNOWN) {
+            return lineStrings;
+        }
+
+        Point furthestPointOfFirstPath = buildUpstream ? lineStrings.get(0).getStartPoint() : lineStrings.get(0).getEndPoint();
+        Point furthestPointOfSecondPath = buildUpstream ? lineStrings.get(lineStrings.size() - 1).getStartPoint() : lineStrings.get(lineStrings.size() - 1).getEndPoint();
+        boolean selectFirstPath = true;
+        boolean isNonCardinal = !CARDINAL_DIRECTIONS.contains(directionEnum);
+
+        switch (directionEnum) {
+            case NORTH:
+                selectFirstPath = buildUpstream
+                    ? furthestPointOfFirstPath.getY() < furthestPointOfSecondPath.getY()
+                    : furthestPointOfFirstPath.getY() > furthestPointOfSecondPath.getY();
+                break;
+            case SOUTH:
+                selectFirstPath = buildUpstream
+                    ? furthestPointOfFirstPath.getY() > furthestPointOfSecondPath.getY()
+                    : furthestPointOfFirstPath.getY() < furthestPointOfSecondPath.getY();
+                break;
+            case EAST:
+                selectFirstPath = buildUpstream
+                    ? furthestPointOfFirstPath.getX() < furthestPointOfSecondPath.getX()
+                    : furthestPointOfFirstPath.getX() > furthestPointOfSecondPath.getX();
+                break;
+            case WEST:
+                selectFirstPath = buildUpstream
+                    ? furthestPointOfFirstPath.getX() > furthestPointOfSecondPath.getX()
+                    : furthestPointOfFirstPath.getX() < furthestPointOfSecondPath.getX();
+                break;
+            default:
+                break;
+        }
+
+        if (isNonCardinal) {
+            // For non-cardinal directions: Calculate bearing between terminal points for better direction accuracy.
+            // Splits the circle into two halves and checks if the angle is within the specified half.
+            int bearing = (int) Math.round(AngleCalc.ANGLE_CALC.calcAzimuth(
+                    furthestPointOfFirstPath.getY(), furthestPointOfFirstPath.getX(),
+                    furthestPointOfSecondPath.getY(),furthestPointOfSecondPath.getX()));
+
+            switch (directionEnum) {
+                case NORTHEAST:
+                    selectFirstPath = bearing >= DUE_NORTHWEST || bearing <= DUE_SOUTHEAST;
+                    break;
+                case SOUTHWEST:
+                    selectFirstPath = bearing > DUE_SOUTHEAST && bearing < DUE_NORTHWEST;
+                    break;
+                case NORTHWEST:
+                    selectFirstPath = bearing >= DUE_SOUTHWEST || bearing <= DUE_NORTHEAST;
+                    break;
+                case SOUTHEAST:
+                    selectFirstPath = bearing > DUE_NORTHEAST && bearing < DUE_SOUTHWEST;
+                    break;
+                default:
+                    break;
+            }
+        }
+
+
+        return selectFirstPath
+            ? Collections.singletonList(lineStrings.get(0))
+            : Collections.singletonList(lineStrings.get(lineStrings.size() - 1));
     }
 
     //endregion
