@@ -126,10 +126,11 @@ public class DirectionFilterHelper {
     }
 
     /**
+     * Retrieves the terminal point of a LineString based on the build direction.
      *
-     * @param lineString
-     * @param buildUpstream
-     * @return
+     * @param lineString the LineString to extract the terminal point from
+     * @param buildUpstream if true, returns the start point; if false, returns the end point
+     * @return the terminal Point of the LineString
      */
     private Point getTerminalPoint(LineString lineString, boolean buildUpstream) {
         return buildUpstream ? lineString.getStartPoint() : lineString.getEndPoint();
