@@ -44,10 +44,9 @@ public class DirectionFilterHelper {
      * @param lineStrings       list of LineStrings to filter
      * @param buildUpstream     whether the paths were built up or downstream
      * @param direction         the direction to filter by
-     * @param thresholdDistance minimum distance (meters) between paths to make reliable direction determination
      * @return A list of LineStrings filtered by the specified direction.
      */
-    public List<LineString> filterPathsByDirection(List<LineString> lineStrings, Boolean buildUpstream, Direction direction, Double thresholdDistance) {
+    public List<LineString> filterPathsByDirection(List<LineString> lineStrings, Boolean buildUpstream, Direction direction) {
         if (lineStrings == null || lineStrings.isEmpty() || lineStrings.size() == 1) {
             return lineStrings != null ? lineStrings : Collections.emptyList();
         }
@@ -59,16 +58,22 @@ public class DirectionFilterHelper {
         Point furthestPointOfFirstPath = getTerminalPoint(lineStrings.get(0), buildUpstream);
         Point furthestPointOfSecondPath = getTerminalPoint(lineStrings.get(lineStrings.size() - 1), buildUpstream);
 
+        // Calculate the total separation between the two terminal points
+        double totalSeparation = Math.sqrt(
+            Math.pow(furthestPointOfFirstPath.getX() - furthestPointOfSecondPath.getX(), 2) +
+            Math.pow(furthestPointOfFirstPath.getY() - furthestPointOfSecondPath.getY(), 2)
+        );
+        double halfSeparation = totalSeparation / 2;
+
         boolean selectFirstPath = true;
         boolean isNonCardinal = !CARDINAL_DIRECTIONS.contains(direction);
-        double halfThresholdInDegrees = thresholdDistance / 2 / DistanceCalcEarth.METERS_PER_DEGREE;
 
         switch (direction) {
             case NORTH:
             case SOUTH:
-                // Default to the first path if Y difference < threshold (paths too horizontal for N/S determination)
+                // Default to the first path if Y difference < half of total separation (paths too horizontal for N/S determination)
                 double yDiff = Math.abs(furthestPointOfFirstPath.getY() - furthestPointOfSecondPath.getY());
-                if (yDiff < halfThresholdInDegrees) break;
+                if (yDiff < halfSeparation) break;
 
                 selectFirstPath = compareCoordinates(
                     furthestPointOfFirstPath.getY(),
@@ -79,9 +84,9 @@ public class DirectionFilterHelper {
                 break;
             case EAST:
             case WEST:
-                // Default to the first path if X difference < threshold (paths too vertical for E/W determination)
+                // Default to the first path if X difference < half of total separation (paths too vertical for E/W determination)
                 double xDiff = Math.abs(furthestPointOfFirstPath.getX() - furthestPointOfSecondPath.getX());
-                if (xDiff < halfThresholdInDegrees) break;
+                if (xDiff < halfSeparation) break;
 
                 selectFirstPath = compareCoordinates(
                     furthestPointOfFirstPath.getX(),
@@ -96,27 +101,28 @@ public class DirectionFilterHelper {
 
         if (isNonCardinal) {
             // For non-cardinal directions: Calculate bearing between terminal points for better direction accuracy.
-            // Splits the circle into two halves and checks if the angle is within the specified half.
+            // Since selectFirstPath defaults to true, we only need to adjust if the bearing is 'clearly the other direction.'
+            // As in the cardinal directions, if the bearing is within 30 degrees of perpendicular to the desired direction,
+            // then leave selectFirstPath = true.
             int bearing = (int) Math.round(AngleCalc.ANGLE_CALC.calcAzimuth(
                     furthestPointOfFirstPath.getY(), furthestPointOfFirstPath.getX(),
                     furthestPointOfSecondPath.getY(),furthestPointOfSecondPath.getX()));
 
-            switch (direction) {
-                case NORTHEAST:
-                    selectFirstPath = bearing >= BEARING_DUE_NORTHWEST || bearing <= BEARING_DUE_SOUTHEAST;
-                    break;
-                case SOUTHWEST:
-                    selectFirstPath = bearing > BEARING_DUE_SOUTHEAST && bearing < BEARING_DUE_NORTHWEST;
-                    break;
-                case NORTHWEST:
-                    selectFirstPath = bearing >= BEARING_DUE_SOUTHWEST || bearing <= BEARING_DUE_NORTHEAST;
-                    break;
-                case SOUTHEAST:
-                    selectFirstPath = bearing > BEARING_DUE_NORTHEAST && bearing < BEARING_DUE_SOUTHWEST;
-                    break;
-                default:
-                    break;
-            }
+            // compute target bearing for the requested intercardinal direction
+            int targetBearing = switch (direction) {
+                case NORTHEAST -> buildUpstream ? BEARING_DUE_NORTHEAST : BEARING_DUE_SOUTHWEST;
+                case SOUTHEAST -> buildUpstream ? BEARING_DUE_SOUTHEAST : BEARING_DUE_NORTHWEST;
+                case SOUTHWEST -> buildUpstream ? BEARING_DUE_SOUTHWEST : BEARING_DUE_NORTHEAST;
+                case NORTHWEST -> buildUpstream ? BEARING_DUE_NORTHWEST : BEARING_DUE_SOUTHEAST;
+                default -> 0;
+            };
+
+            // convert difference to range 0-180 (for instance, if two bearings are a difference of 190 then use 170 since going the other way is shorter)
+            int diff = Math.abs(bearing - targetBearing);
+            if (diff > 180) diff = 360 - diff;
+
+            // more than 120 degrees off -> selectFirstPath = false
+            selectFirstPath = diff <= 120;
         }
 
 

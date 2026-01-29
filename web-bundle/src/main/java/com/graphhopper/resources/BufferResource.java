@@ -128,8 +128,7 @@ public class BufferResource {
         List<LineString> filteredLineStrings = directionFilterHelper.filterPathsByDirection(
                 generatedPaths,
                 buildUpstream,
-                DirectionFilterHelper.Direction.valueOf(direction.toUpperCase()),
-                thresholdDistance);
+                DirectionFilterHelper.Direction.valueOf(direction.toUpperCase()));
         return createGeoJsonResponse(filteredLineStrings, stopWatch);
     }
 
