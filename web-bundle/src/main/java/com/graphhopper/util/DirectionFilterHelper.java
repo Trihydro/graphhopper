@@ -38,10 +38,10 @@ public class DirectionFilterHelper {
     );
 
     /**
-     * Filters a list of LineStrings based on the specified cardinal or intercardinal direction.
+     * Filters a list of 2 LineStrings based on the specified cardinal or intercardinal direction.
      * Compares the furthest points of the first and last LineStrings to determine which aligns
      * best with the desired direction, returning only the selected LineString.
-     * @param lineStrings       list of LineStrings to filter
+     * @param lineStrings       list of 2 LineStrings to filter
      * @param buildUpstream     whether the paths were built up or downstream
      * @param direction         the direction to filter by
      * @return A list of LineStrings filtered by the specified direction.
@@ -58,46 +58,8 @@ public class DirectionFilterHelper {
         Point furthestPointOfFirstPath = getTerminalPoint(lineStrings.get(0), buildUpstream);
         Point furthestPointOfSecondPath = getTerminalPoint(lineStrings.get(lineStrings.size() - 1), buildUpstream);
 
-        // Calculate the total separation between the two terminal points
-        double totalSeparation = Math.sqrt(
-            Math.pow(furthestPointOfFirstPath.getX() - furthestPointOfSecondPath.getX(), 2) +
-            Math.pow(furthestPointOfFirstPath.getY() - furthestPointOfSecondPath.getY(), 2)
-        );
-        double halfSeparation = totalSeparation / 2;
-
         boolean selectFirstPath = true;
         boolean isNonCardinal = !CARDINAL_DIRECTIONS.contains(direction);
-
-        switch (direction) {
-            case NORTH:
-            case SOUTH:
-                // Default to the first path if Y difference < half of total separation (paths too horizontal for N/S determination)
-                double yDiff = Math.abs(furthestPointOfFirstPath.getY() - furthestPointOfSecondPath.getY());
-                if (yDiff < halfSeparation) break;
-
-                selectFirstPath = compareCoordinates(
-                    furthestPointOfFirstPath.getY(),
-                    furthestPointOfSecondPath.getY(),
-                    direction == Direction.NORTH,
-                    buildUpstream
-                );
-                break;
-            case EAST:
-            case WEST:
-                // Default to the first path if X difference < half of total separation (paths too vertical for E/W determination)
-                double xDiff = Math.abs(furthestPointOfFirstPath.getX() - furthestPointOfSecondPath.getX());
-                if (xDiff < halfSeparation) break;
-
-                selectFirstPath = compareCoordinates(
-                    furthestPointOfFirstPath.getX(),
-                    furthestPointOfSecondPath.getX(),
-                    direction == Direction.EAST,
-                    buildUpstream
-                );
-                break;
-            default:
-                break;
-        }
 
         if (isNonCardinal) {
             // For non-cardinal directions: Calculate bearing between terminal points for better direction accuracy.
@@ -124,7 +86,45 @@ public class DirectionFilterHelper {
             // more than 120 degrees off -> selectFirstPath = false
             selectFirstPath = diff <= 120;
         }
+        else {
+            // Calculate the total separation between the two terminal points
+            double totalSeparation = Math.sqrt(
+                    Math.pow(furthestPointOfFirstPath.getX() - furthestPointOfSecondPath.getX(), 2) +
+                            Math.pow(furthestPointOfFirstPath.getY() - furthestPointOfSecondPath.getY(), 2)
+            );
+            double halfSeparation = totalSeparation / 2;
 
+            switch (direction) {
+                case NORTH:
+                case SOUTH:
+                    // Default to the first path if Y difference < half of total separation (paths too horizontal for N/S determination)
+                    double yDiff = Math.abs(furthestPointOfFirstPath.getY() - furthestPointOfSecondPath.getY());
+                    if (yDiff < halfSeparation) break;
+
+                    selectFirstPath = compareCoordinates(
+                        furthestPointOfFirstPath.getY(),
+                        furthestPointOfSecondPath.getY(),
+                        direction == Direction.NORTH,
+                        buildUpstream
+                    );
+                    break;
+                case EAST:
+                case WEST:
+                    // Default to the first path if X difference < half of total separation (paths too vertical for E/W determination)
+                    double xDiff = Math.abs(furthestPointOfFirstPath.getX() - furthestPointOfSecondPath.getX());
+                    if (xDiff < halfSeparation) break;
+
+                    selectFirstPath = compareCoordinates(
+                        furthestPointOfFirstPath.getX(),
+                        furthestPointOfSecondPath.getX(),
+                        direction == Direction.EAST,
+                        buildUpstream
+                    );
+                    break;
+                default:
+                    break;
+            }
+        }
 
         return selectFirstPath
             ? Collections.singletonList(lineStrings.get(0))
