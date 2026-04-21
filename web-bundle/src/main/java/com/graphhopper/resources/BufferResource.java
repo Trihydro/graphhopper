@@ -18,10 +18,7 @@ import com.graphhopper.util.shapes.BBox;
 import com.graphhopper.util.shapes.GHPoint;
 import com.graphhopper.util.shapes.GHPoint3D;
 import org.jetbrains.annotations.Nullable;
-import org.locationtech.jts.geom.Coordinate;
-import org.locationtech.jts.geom.GeometryFactory;
-import org.locationtech.jts.geom.LineString;
-import org.locationtech.jts.geom.PrecisionModel;
+import org.locationtech.jts.geom.*;
 
 import jakarta.inject.Inject;
 import jakarta.validation.constraints.NotNull;
@@ -365,34 +362,28 @@ public class BufferResource {
      */
     private LineString buildCompletePath(BufferFeature startFeature, String roadName, Double thresholdDistance,
                                          Boolean upstreamPath, Boolean upstreamStart) {
-        // Get geometry of starting edge up to the startFeature point
-        PointList startingEdgeGeometry = computeStartingEdgeGeometryWithinThreshold(startFeature, upstreamStart, thresholdDistance);
-        boolean canReturnStartFeature = canReturnStartFeature(startingEdgeGeometry, startFeature, upstreamStart, thresholdDistance);
-
-        // Get path from the startFeature to the edge that reaches the threshold distance
-        BufferFeature featureToThreshold = buildPathToThresholdDistance(startFeature, thresholdDistance, roadName,
-                upstreamPath, upstreamStart, canReturnStartFeature);
-
-        // Get geometry of final segment from featureToThreshold to threshold point
-        PointList finalSegmentToThreshold = computeFinalSegmentToThreshold(startFeature, thresholdDistance,
-                featureToThreshold, canReturnStartFeature);
-
         List<Coordinate> coordinates = new ArrayList<>();
 
-        // Add start feature points
+        // Get geometry of starting edge up to the startFeature point
+        PointList startingEdgeGeometry = computeStartingEdgeGeometryWithinThreshold(startFeature, upstreamStart, thresholdDistance);
         for (GHPoint point : startingEdgeGeometry) {
             coordinates.add(new Coordinate(point.getLon(), point.getLat()));
         }
 
-        // Add to-threshold points unless canReturnStartFeature is false as they exceed the threshold distance.
-        if(canReturnStartFeature)
+        boolean startEdgeIsWithinThreshold = isStartPointWithinThreshold(startingEdgeGeometry, startFeature, upstreamStart, thresholdDistance);
+
+        // Get path from the startFeature to the edge that reaches the threshold distance
+        BufferFeature featureToThreshold = null;
+        if (startEdgeIsWithinThreshold)
         {
+            featureToThreshold = buildPathToThresholdDistance(startFeature, thresholdDistance, roadName, upstreamPath, upstreamStart);
             for (GHPoint point : featureToThreshold.getPath()) {
                 coordinates.add(new Coordinate(point.getLon(), point.getLat()));
             }
         }
 
-        // Add final segment points
+        // Get geometry of final segment to the threshold point
+        PointList finalSegmentToThreshold = computeFinalSegmentToThreshold(startFeature, thresholdDistance, featureToThreshold, startEdgeIsWithinThreshold, upstreamPath);
         for (GHPoint point : finalSegmentToThreshold) {
             Coordinate coordinate = new Coordinate(point.getLon(), point.getLat());
             if (!coordinates.contains(coordinate)) {
@@ -504,15 +495,12 @@ public class BufferResource {
      * @param roadName          name of road to follow (null for unnamed road logic)
      * @param upstreamPath      direction to build path - either along or against road's flow
      * @param upstreamStart     initial 'launch' direction - used only for a bidirectional start
-     * @param isOkayToReturnStartFeature determines if returning the start feature is acceptable
-     *                                   when threshold constraints cannot be met
      *
      * @return BufferFeature containing the edge at threshold distance and the complete
      *         path geometry traversed from start to that edge
      */
     private BufferFeature buildPathToThresholdDistance(final BufferFeature startFeature, Double thresholdDistance,
-                                                       String roadName, Boolean upstreamPath, Boolean upstreamStart,
-                                                       Boolean isOkayToReturnStartFeature) {
+                                                       String roadName, Boolean upstreamPath, Boolean upstreamStart) {
         List<Integer> usedEdges = new ArrayList<>() {
             {
                 add(startFeature.getEdge());
@@ -534,13 +522,13 @@ public class BufferResource {
         int previousEdge = currentEdge;
         int originalNode = currentNode;
 
-        if (currentDistance >= thresholdDistance && isOkayToReturnStartFeature) {
+        if (currentDistance >= thresholdDistance) {
             return startFeature;
         }
 
         boolean isNodeOriginalNode = true;
-        // If the threshold is exceeded, we can stop looping only if it isOkayToReturnStartFeature OR the currentNode is not the originalNode
-        while (currentDistance < thresholdDistance || ( !isOkayToReturnStartFeature && isNodeOriginalNode )) {
+        // If the threshold is exceeded, we can stop looping only if the currentNode is not the originalNode
+        while (currentDistance < thresholdDistance || isNodeOriginalNode) {
             EdgeIterator iterator = edgeExplorer.setBaseNode(currentNode);
             List<Integer> potentialEdges = new ArrayList<>();
             List<Integer> potentialRoundaboutEdges = new ArrayList<>();
@@ -665,7 +653,7 @@ public class BufferResource {
 
             // Break before moving to next node in case hitting the threshold
             isNodeOriginalNode = currentNode == originalNode;
-            if (currentDistance >= thresholdDistance && ( isOkayToReturnStartFeature || !isNodeOriginalNode )) {
+            if (currentDistance >= thresholdDistance && !isNodeOriginalNode) {
                 break;
             }
 
@@ -711,11 +699,22 @@ public class BufferResource {
      *         or empty list if start and end are on the same edge
      */
     private PointList computeFinalSegmentToThreshold(BufferFeature startFeature, Double thresholdDistance,
-                                                     BufferFeature endFeature, Boolean isOkayToReturnZeroPoints) {
-        if(endFeature.getEdge() < 0)
+                                                     BufferFeature endFeature, Boolean isOkayToReturnZeroPoints, boolean upstreamPath) {
+        if(endFeature == null || endFeature.getEdge() < 0)
         {
+            if (!isOkayToReturnZeroPoints) {
+                var startPoint = startFeature.getPoint();
+                EdgeIteratorState startEdgeState = graph.getEdgeIteratorState(startFeature.getEdge(), Integer.MIN_VALUE);
+                int endNode = upstreamPath ? startEdgeState.getBaseNode() : startEdgeState.getAdjNode();
+                var createdPoint = interpolatePointAtDistance(startPoint.getLat(), startPoint.getLon(), nodeAccess.getLat(endNode), nodeAccess.getLon(endNode), thresholdDistance, startPoint.ele);
+                PointList result = new PointList();
+                result.add(createdPoint);
+                return result;
+            }
+
             return new PointList();
         }
+
         EdgeIteratorState finalState = graph.getEdgeIteratorState(endFeature.getEdge(), Integer.MIN_VALUE);
         PointList pointList = finalState.fetchWayGeometry(FetchMode.PILLAR_ONLY);
 
@@ -753,20 +752,27 @@ public class BufferResource {
         Double currentDistance = endFeature.getDistance();
         GHPoint3D previousPoint = pointList.get(0);
 
-        PointList resultPointList = truncatePathAtThreshold(thresholdDistance, pointList, currentDistance, previousPoint);
+        return truncatePathAtThreshold(thresholdDistance, pointList, currentDistance, previousPoint);
+    }
 
-        // If we must return a point, and we do not have one then we need to create a point.  We can create a point because the
-        // line segment connecting any two consecutive points of a path necessarily lies entirely on the road.
-        if(!isOkayToReturnZeroPoints && resultPointList.isEmpty())
-        {
-            GHPoint3D beyondThresholdPoint = pointList.get(0);
-            double totalDist = distanceHelper.calculatePointDistance(startFeature.getPoint().lat, startFeature.getPoint().lon, beyondThresholdPoint.lat, beyondThresholdPoint.lon);
-            double resultLat  = startFeature.getPoint().lat + (beyondThresholdPoint.lat - startFeature.getPoint().lat) * (thresholdDistance/totalDist);
-            double resultLon = startFeature.getPoint().lon + (beyondThresholdPoint.lon - startFeature.getPoint().lon) * (thresholdDistance/totalDist);
-            GHPoint3D resultPoint = new GHPoint3D(resultLat, resultLon, startFeature.getPoint().ele);
-            resultPointList.add(resultPoint);
-        }
-        return resultPointList;
+
+    /**
+     * Returns a point on the line from ({@code startLat}, {@code startLon}) to ({@code endLat}, {@code endLon}),
+     * placed exactly {@code distance} meters from the start.
+     *
+     * @param startLat       latitude of the start point
+     * @param startLon       longitude of the start point
+     * @param endLat         latitude of the end point
+     * @param endLon         longitude of the end point
+     * @param distance       distance in meters from the start point to place the result
+     * @param startElevation elevation to assign to the resulting point
+     * @return interpolated point at the specified distance along the line
+     */
+    private GHPoint3D interpolatePointAtDistance(double startLat, double startLon, double endLat, double endLon, double distance, double startElevation) {
+        double totalDist = distanceHelper.calculatePointDistance(startLat, startLon, endLat, endLon);
+        double resultLat  = startLat + (endLat - startLat) * (distance/totalDist);
+        double resultLon = startLon + (endLon - startLon) * (distance/totalDist);
+        return new GHPoint3D(resultLat, resultLon, startElevation);
     }
 
     /**
@@ -999,30 +1005,29 @@ public class BufferResource {
     //region Utility Methods
 
     /**
-     * Determines whether the start feature can be returned based on edge geometry and distance constraints.
-     * Returns true if the starting edge has multiple geometry points, or if it has only one point and
-     * the distance to the target node is within the threshold.
+     * Returns true if the edge has multiple geometry points, or if the distance from
+     * {@code startPoint} to the nearest node is within {@code thresholdDistance}.
      *
-     * @param startingEdgeGeometry  the geometry of the starting edge
-     * @param startFeature         the buffer feature to start at
-     * @param isUpstream        initial 'launch' direction
-     * @param thresholdDistance    maximum distance in meters
-     * @return true if it's okay to return the start feature, false otherwise
+     * @param edgeGeometry      geometry of the edge
+     * @param startPoint        point on the edge to measure from
+     * @param isUpstream        traversal direction
+     * @param thresholdDistance maximum allowed distance in meters
+     * @return true if within threshold, false otherwise
      */
-    private boolean canReturnStartFeature(PointList startingEdgeGeometry, BufferFeature startFeature,
-                                           Boolean isUpstream, Double thresholdDistance) {
+    private boolean isStartPointWithinThreshold(PointList edgeGeometry, BufferFeature startPoint,
+                                                Boolean isUpstream, Double thresholdDistance) {
         // Multiple geometry points means we can safely return the start feature
-        if (startingEdgeGeometry.size() > 1) {
+        if (edgeGeometry.size() > 1) {
             return true;
         }
 
         // A single point requires distance validation against the threshold distance
         // 1. If the start feature is within the threshold distance of the nearest node, we can return it
         // 2. Otherwise, we cannot return it as it would exceed the threshold
-        EdgeIteratorState startEdgeState = graph.getEdgeIteratorState(startFeature.getEdge(), Integer.MIN_VALUE);
+        EdgeIteratorState startEdgeState = graph.getEdgeIteratorState(startPoint.getEdge(), Integer.MIN_VALUE);
         int startNode = isUpstream ? startEdgeState.getBaseNode() : startEdgeState.getAdjNode();
         double startDistance = distanceHelper.calculatePointDistance(
-                startFeature.getPoint().getLat(), startFeature.getPoint().getLon(),
+                startPoint.getPoint().getLat(), startPoint.getPoint().getLon(),
                 nodeAccess.getLat(startNode), nodeAccess.getLon(startNode));
 
         return startDistance < thresholdDistance;
