@@ -527,8 +527,7 @@ public class BufferResource {
         }
 
         boolean isNodeOriginalNode = true;
-        // If the threshold is exceeded, we can stop looping only if the currentNode is not the originalNode
-        while (currentDistance < thresholdDistance || isNodeOriginalNode) {
+        while (currentDistance < thresholdDistance) {
             EdgeIterator iterator = edgeExplorer.setBaseNode(currentNode);
             List<Integer> potentialEdges = new ArrayList<>();
             List<Integer> potentialRoundaboutEdges = new ArrayList<>();
