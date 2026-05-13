@@ -25,6 +25,7 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+
 import java.util.*;
 import java.util.stream.Stream;
 
@@ -45,6 +46,7 @@ public class BufferResource {
 
     //region Constants, Enums and Records
     private static final double PROXIMITY_THRESHOLD_METERS = 6.096; // 20 feet
+    private static final double NAMED_EDGE_PREFERENCE_TOLERANCE_METERS = 0.3048; // 1 foot
     private static final double INITIAL_SEARCH_RADIUS_DEGREES = 0.0001; // Roughly 11 meters
 
     /**
@@ -62,6 +64,15 @@ public class BufferResource {
             preferredEdges = preferredEdges != null ? preferredEdges : Collections.emptyList();
         }
     }
+
+    /**
+     * Holds the result of a closest-edge lookup.
+     *
+     * @param edgeId   the ID of the closest edge, or {@code null} if no candidate edges were provided
+     * @param distance the straight-line distance in meters from the query point to the closest edge;
+     *                 {@link Double#MAX_VALUE} when {@code edgeId} is {@code null}
+     */
+    public record ClosestEdgeResult(Integer edgeId, double distance) {}
 
     //endregion
     //region Constructor
@@ -195,10 +206,7 @@ public class BufferResource {
         });
 
         // Find the closest edge within proximity
-        List<Integer> edgesWithinProximity = new ArrayList<>();
-        edgesWithinProximity.addAll(namedEdges);
-        edgesWithinProximity.addAll(unnamedEdges);
-        Integer closestEdge = findClosestEdgeByDistance(edgesWithinProximity, point.get().lat, point.get().lon);
+        Integer closestEdge = selectClosestEdgePreferringNamed(namedEdges, unnamedEdges, point.get().lat, point.get().lon);
 
         if (closestEdge != null) {
             EdgeIteratorState state = graph.getEdgeIteratorState(closestEdge, Integer.MIN_VALUE);
@@ -378,9 +386,16 @@ public class BufferResource {
         {
             featureToThreshold = buildPathToThresholdDistance(startFeature, thresholdDistance, roadName, upstreamPath, upstreamStart);
             for (GHPoint point : featureToThreshold.getPath()) {
-                coordinates.add(new Coordinate(point.getLon(), point.getLat()));
+                Coordinate coordinate = new Coordinate(point.getLon(), point.getLat());
+                if (!coordinates.contains(coordinate)) {
+                    coordinates.add(coordinate);
+                }
             }
         }
+
+        // If only the start point was added, force final segment generation directly from start to threshold.
+        if (coordinates.size() == 1)
+            startEdgeIsWithinThreshold = false;
 
         // Get geometry of final segment to the threshold point
         PointList finalSegmentToThreshold = computeFinalSegmentToThreshold(startFeature, thresholdDistance, featureToThreshold, startEdgeIsWithinThreshold, upstreamPath);
@@ -860,14 +875,48 @@ public class BufferResource {
     }
 
     /**
+     * Selects the closest edge to the given point from two candidate lists — named and unnamed edges —
+     * preferring the named edge when it is closer or within {@code NAMED_EDGE_PREFERENCE_TOLERANCE_METERS}
+     * of the closest unnamed edge. Only falls back to the unnamed edge when the named edge is further away
+     * by more than that tolerance.
+     *
+     * <p>Selection rules:</p>
+     * <ul>
+     *   <li>Named only: returns the closest named edge.</li>
+     *   <li>Unnamed only: returns the closest unnamed edge.</li>
+     *   <li>Both present: returns the named edge if its distance is less than or equal to
+     *       {@code unnamedDistance + NAMED_EDGE_PREFERENCE_TOLERANCE_METERS}; otherwise the unnamed edge.</li>
+     * </ul>
+     *e
+     * @param namedEdges   list of named edge IDs to search
+     * @param unnamedEdges list of unnamed edge IDs to search
+     * @param lat          latitude of the target point
+     * @param lon          longitude of the target point
+     * @return the selected edge ID, or null if both lists are empty
+     */
+    private Integer selectClosestEdgePreferringNamed(List<Integer> namedEdges, List<Integer> unnamedEdges, double lat, double lon) {
+        ClosestEdgeResult closestNamed = findClosestEdgeByDistance(namedEdges, lat, lon);
+        ClosestEdgeResult closestUnnamed = findClosestEdgeByDistance(unnamedEdges, lat, lon);
+
+        if (closestNamed.edgeId() == null) return closestUnnamed.edgeId();
+        if (closestUnnamed.edgeId() == null) return closestNamed.edgeId();
+
+        // Prefer named when it is closer, or only slightly farther than the unnamed edge
+        boolean namedIsCloserOrWithinForgiveness =
+                closestNamed.distance() <= closestUnnamed.distance() + NAMED_EDGE_PREFERENCE_TOLERANCE_METERS;
+
+        return namedIsCloserOrWithinForgiveness ? closestNamed.edgeId() : closestUnnamed.edgeId();
+    }
+
+    /**
      * Finds the closest edge by distance from a list of edges.
      *
      * @param edges list of edge IDs to search
      * @param lat latitude of the target point
      * @param lon longitude of the target point
-     * @return closest edge ID, or null if no edges found
+     * @return closest edge ID with the distance, or null if no edges found
      */
-    private Integer findClosestEdgeByDistance(List<Integer> edges, double lat, double lon) {
+    private ClosestEdgeResult findClosestEdgeByDistance(List<Integer> edges, double lat, double lon) {
         double minDistance = Double.MAX_VALUE;
         Integer closestEdge = null;
 
@@ -879,7 +928,7 @@ public class BufferResource {
             }
         }
 
-        return closestEdge;
+        return new ClosestEdgeResult(closestEdge, minDistance);
     }
 
     //endregion
