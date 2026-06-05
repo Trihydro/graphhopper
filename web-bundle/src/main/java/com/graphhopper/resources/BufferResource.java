@@ -345,7 +345,7 @@ public class BufferResource {
             EdgeIteratorState state = graph.getEdgeIteratorState(edgeId, Integer.MIN_VALUE);
             List<String> queryRoadNames = getAllRouteNamesFromEdge(state);
 
-            if ((roadName != null && queryRoadNames.stream().anyMatch(x -> x.contains(roadName)))
+            if ((roadName != null && queryRoadNames.stream().anyMatch(x -> x.equals(roadName)))
                     || (roadName == null && !queryRoadNames.stream().allMatch(String::isEmpty))) {
                 filteredEdgesInBbox.add(edgeId);
             }
@@ -560,7 +560,7 @@ public class BufferResource {
 
                     // Temp has proper road name, isn't part of a roundabout, and bidirectional.
                     // Higher priority escape.
-                    if (roadName != null && roadNames.stream().anyMatch(x -> x.contains(roadName))
+                    if (roadName != null && roadNames.stream().anyMatch(x -> x.equals(roadName))
                             && !tempState.get(this.roundaboutAccessEnc)
                             && isBidirectional(tempState)) {
                         currentEdge = tempEdge;
@@ -569,13 +569,13 @@ public class BufferResource {
                     }
 
                     // Temp has proper road name and isn't part of a roundabout. Lower priority escape.
-                    else if (roadName != null && roadNames.stream().anyMatch(x -> x.contains(roadName))
+                    else if (roadName != null && roadNames.stream().anyMatch(x -> x.equals(roadName))
                             && !tempState.get(this.roundaboutAccessEnc)) {
                         potentialEdges.add(tempEdge);
                     }
 
                     // Temp has proper road name and is part of a roundabout. Higher entry priority.
-                    else if (roadName != null && roadNames.stream().anyMatch(x -> x.contains(roadName))
+                    else if (roadName != null && roadNames.stream().anyMatch(x -> x.equals(roadName))
                             && tempState.get(this.roundaboutAccessEnc)) {
                         potentialRoundaboutEdges.add(tempEdge);
                     }
