@@ -588,14 +588,9 @@ public class BufferResource {
                         boolean matchesPreviousEdgeName = (currentIsBlank && previousIsBlank)
                                 || (currentEdgeRoadName != null && currentEdgeRoadName.equals(previousRoadName));
 
-                        if (matchesPreviousEdgeName && !currentIsBlank) {
-                            currentEdge = tempEdge;
-                            usedEdges.add(tempEdge);
-                            break;
-                        }
-
-                        // Collect both named and unnamed edges for angle-based selection when continuing from an unnamed road.
-                        if (previousIsBlank) {
+                        // Collect all qualifying unnamed edges that either match the previous edge name or are the first unnamed edge after a named edge.
+                        // After the loop we will select the straightest edge from this list to continue the path.
+                        if ((matchesPreviousEdgeName && !currentIsBlank) || previousIsBlank) {
                             candidateEdgesFromUnnamedRoad.add(tempEdge);
                         }
                     }
