@@ -398,6 +398,24 @@ public class BufferResourceTest {
     }
 
     @Test
+    public void testUnidirectionalUpstreamPathWithUnnamedEdgeStart() {
+        JsonFeatureCollection featureCollection;
+        try (Response response = clientTarget(app, "/buffer?queryMultiplier=.000075&"
+                + "point=42.531666,1.520129&roadName=CG-3&thresholdDistance=200&buildUpstream=true")
+                .request().buildGet().invoke()) {
+            assertEquals(200, response.getStatus());
+
+            featureCollection = response.readEntity(JsonFeatureCollection.class);
+        }
+
+        // Expect a single feature collection for unidirectional
+        assertEquals(1, featureCollection.getFeatures().size());
+        // Expect a line string with coordinates to have been built
+        Geometry lineString0 = featureCollection.getFeatures().get(0).getGeometry();
+        assertNotEquals(0, lineString0.getCoordinates().length);
+    }
+
+    @Test
     public void testBidirectionalUpstreamPathWhenRequireRoadMatchIsFalse_InvalidName() {
         JsonFeatureCollection featureCollection;
         try (Response response = clientTarget(app, "/buffer?profile=my_car&"
